@@ -27,6 +27,89 @@ Construir o projeto de forma incremental, com modulos pequenos, testes e commits
 - `models`: modelos de dominio
 - `services`: casos de uso da aplicacao
 
+## Status Atual
+
+- Estrutura inicial do projeto criada.
+- Webhook FastAPI para Telegram criado em `/telegram/webhook`.
+- Parser por regras criado para despesas, receitas e transferencias simples.
+- Validacao de movimentacoes financeiras criada.
+- Persistencia inicial com SQLAlchemy e SQLite criada.
+- Testes automatizados cobrindo estrutura, webhook, parser, validacao e repositorio.
+
+## Proximos Passos
+
+O projeto deve continuar em modulos pequenos, sempre com testes, revisao de credenciais, commit e push antes de avancar.
+
+1. Criar o servico de lancamento financeiro.
+   - Orquestrar parser, validacao e repositorio.
+   - Retornar resultado estruturado para sucesso, erro e pendencias de confirmacao.
+   - Commit sugerido: `feat: adiciona serviço de lançamento financeiro`.
+
+2. Conectar o webhook do Telegram ao servico.
+   - Ler mensagens recebidas.
+   - Registrar movimentacoes validas.
+   - Retornar respostas amigaveis para o usuario.
+   - Commit sugerido: `feat: conecta telegram ao serviço financeiro`.
+
+3. Adicionar prevencao de duplicidade.
+   - Criar hash da mensagem e dados principais.
+   - Evitar registros repetidos em janela curta de tempo.
+   - Commit sugerido: `feat: evita lançamentos duplicados`.
+
+4. Criar consultas financeiras.
+   - Resumo do mes.
+   - Gastos por categoria.
+   - Saldo mensal.
+   - Despesas pendentes.
+   - Resumo semanal.
+   - Commit sugerido: `feat: adiciona consultas financeiras`.
+
+5. Criar integracao com Google Sheets.
+   - Cliente autenticado por Service Account.
+   - Append de lancamentos.
+   - Sincronizacao manual inicial.
+   - Commit sugerido: `feat: adiciona integração com google sheets`.
+
+6. Criar estrutura das abas da planilha.
+   - `Lancamentos`
+   - `Categorias`
+   - `Contas`
+   - `Resumo_Mensal`
+   - `Categorias_Mes`
+   - `Pendentes`
+   - `Dashboard`
+   - Commit sugerido: `feat: cria modelo de planilha financeira`.
+
+7. Adicionar dashboards e indicadores.
+   - Receitas, despesas e saldo mensal.
+   - Gastos por categoria.
+   - Maiores despesas.
+   - Fixos vs variaveis.
+   - Economia ou deficit.
+   - Commit sugerido: `feat: adiciona indicadores financeiros`.
+
+8. Adicionar IA opcional.
+   - Usar modelo barato apenas quando o parser por regras tiver baixa confianca.
+   - Retornar JSON estruturado.
+   - Manter `AI_ENABLED=false` como padrao.
+   - Commit sugerido: `feat: adiciona parser com IA opcional`.
+
+9. Melhorar logs e tratamento de erros.
+   - Padronizar logs por modulo.
+   - Capturar erros do Telegram, banco e Google Sheets.
+   - Evitar exposicao de dados sensiveis nos logs.
+   - Commit sugerido: `feat: melhora logs e tratamento de erros`.
+
+10. Preparar deploy.
+    - Adicionar comando de start.
+    - Documentar variaveis de ambiente.
+    - Configurar webhook publico.
+    - Commit sugerido: `docs: adiciona guia de deploy`.
+
+11. Adicionar CI.
+    - Rodar `pytest`, `ruff` e `compileall` no GitHub Actions.
+    - Commit sugerido: `ci: adiciona validações automatizadas`.
+
 ## Desenvolvimento
 
 1. Copie `.env.example` para `.env`.
@@ -37,6 +120,7 @@ Construir o projeto de forma incremental, com modulos pequenos, testes e commits
 ```bash
 python -m compileall src tests
 python -m pytest
+python -m ruff check .
 ```
 
 ## Politica De Seguranca
@@ -44,4 +128,3 @@ python -m pytest
 - Nunca commitar `.env`, tokens, chaves ou credenciais.
 - Manter `.env.example` atualizado sem valores sensiveis.
 - Validar o diff antes de cada commit.
-
