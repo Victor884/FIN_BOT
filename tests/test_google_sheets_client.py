@@ -6,6 +6,7 @@ import pytest
 from finbot.core.errors import ConfigurationError
 from finbot.core.settings import Settings
 from finbot.db.models import TransactionRecord
+from finbot.services.queries import FinancialSummary
 from finbot.sheets.client import DEFAULT_TRANSACTIONS_RANGE, GoogleSheetsClient
 from finbot.sheets.rows import TRANSACTION_HEADERS, transaction_to_sheet_row
 
@@ -138,6 +139,33 @@ def test_setup_workbook_creates_sheets_and_headers() -> None:
         "valueInputOption": "USER_ENTERED",
         "body": {"values": [list(TRANSACTION_HEADERS)]},
     }
+
+
+def test_update_financial_dashboard_updates_expected_ranges() -> None:
+    fake_service = FakeSheetsService()
+    client = GoogleSheetsClient(service=fake_service, spreadsheet_id="sheet-id")
+    transaction = make_transaction()
+    summary = FinancialSummary(
+        start_date=date(2026, 7, 1),
+        end_date=date(2026, 7, 31),
+        total_income=Decimal("2500"),
+        total_expenses=Decimal("45.90"),
+        balance=Decimal("2454.10"),
+        pending_total=Decimal("0"),
+        expenses_by_category={"alimentacao": Decimal("45.90")},
+        largest_expenses=(transaction,),
+    )
+
+    responses = client.update_financial_dashboard(summary, pending_transactions=[transaction])
+
+    assert len(responses) == 5
+    assert [call["range"] for call in fake_service.values_resource.update_calls] == [
+        "Dashboard!A2",
+        "Dashboard!A8",
+        "Resumo_Mensal!A2",
+        "Categorias_Mes!A2",
+        "Pendentes!A2",
+    ]
 
 
 def test_from_settings_requires_spreadsheet_id() -> None:

@@ -7,10 +7,16 @@ from googleapiclient.discovery import build
 from finbot.core.errors import ConfigurationError
 from finbot.core.settings import Settings
 from finbot.db.models import TransactionRecord
+from finbot.sheets.dashboard import category_month_rows
+from finbot.sheets.dashboard import dashboard_rows_from_summary
+from finbot.sheets.dashboard import largest_expense_rows
+from finbot.sheets.dashboard import monthly_summary_row
+from finbot.sheets.dashboard import pending_rows
 from finbot.sheets.layout import SheetDefinition
 from finbot.sheets.layout import build_create_missing_sheets_request
 from finbot.sheets.layout import default_sheet_definitions
 from finbot.sheets.rows import transaction_to_sheet_row
+from finbot.services.queries import FinancialSummary
 
 
 SHEETS_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
@@ -112,6 +118,19 @@ class GoogleSheetsClient:
         )
         response = request.execute()
         return dict(response)
+
+    def update_financial_dashboard(
+        self,
+        summary: FinancialSummary,
+        pending_transactions: Sequence[TransactionRecord],
+    ) -> list[dict[str, object]]:
+        return [
+            self.update_values("Dashboard!A2", dashboard_rows_from_summary(summary)),
+            self.update_values("Dashboard!A8", largest_expense_rows(summary)),
+            self.update_values("Resumo_Mensal!A2", [monthly_summary_row(summary)]),
+            self.update_values("Categorias_Mes!A2", category_month_rows(summary)),
+            self.update_values("Pendentes!A2", pending_rows(list(pending_transactions))),
+        ]
 
     def _batch_update(self, body: dict[str, object]) -> dict[str, object]:
         request = self._service.spreadsheets().batchUpdate(
