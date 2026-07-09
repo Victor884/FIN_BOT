@@ -36,6 +36,9 @@ class SheetsSpreadsheetsResource(Protocol):
     def values(self) -> SheetsValuesResource:
         pass
 
+    def get(self, **kwargs: object) -> object:
+        pass
+
     def batchUpdate(self, **kwargs: object) -> object:
         pass
 
@@ -94,7 +97,14 @@ class GoogleSheetsClient:
         sheet_definitions: Sequence[SheetDefinition] | None = None,
     ) -> list[dict[str, object]]:
         definitions = tuple(sheet_definitions or default_sheet_definitions())
-        responses = [self._batch_update(build_create_missing_sheets_request(definitions))]
+        existing_titles = self._existing_sheet_titles()
+        missing_definitions = tuple(
+            definition for definition in definitions if definition.title not in existing_titles
+        )
+        responses = []
+
+        if missing_definitions:
+            responses.append(self._batch_update(build_create_missing_sheets_request(missing_definitions)))
 
         for definition in definitions:
             responses.append(
@@ -108,6 +118,20 @@ class GoogleSheetsClient:
             responses.append(self.update_values(range_name=range_name, values=values))
 
         return responses
+
+    def _existing_sheet_titles(self) -> set[str]:
+        request = self._service.spreadsheets().get(
+            spreadsheetId=self._spreadsheet_id,
+            fields="sheets.properties.title",
+        )
+        response = request.execute()
+        sheets = response.get("sheets", [])
+        titles = {
+            sheet.get("properties", {}).get("title")
+            for sheet in sheets
+            if sheet.get("properties", {}).get("title")
+        }
+        return {str(title) for title in titles}
 
     def update_values(self, range_name: str, values: Sequence[Sequence[object]]) -> dict[str, object]:
         request = (

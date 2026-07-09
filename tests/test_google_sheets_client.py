@@ -38,12 +38,20 @@ class FakeValuesResource:
 
 
 class FakeSpreadsheetsResource:
-    def __init__(self, values_resource: FakeValuesResource) -> None:
+    def __init__(self, values_resource: FakeValuesResource, existing_sheet_titles: list[str] | None = None) -> None:
         self._values_resource = values_resource
+        self._existing_sheet_titles = existing_sheet_titles or []
         self.batch_update_kwargs: dict[str, object] | None = None
 
     def values(self) -> FakeValuesResource:
         return self._values_resource
+
+    def get(self, **kwargs: object) -> FakeUpdateRequest:
+        sheets = [
+            {"properties": {"title": title}}
+            for title in self._existing_sheet_titles
+        ]
+        return FakeUpdateRequest({"sheets": sheets})
 
     def batchUpdate(self, **kwargs: object) -> FakeUpdateRequest:
         self.batch_update_kwargs = kwargs
@@ -51,9 +59,12 @@ class FakeSpreadsheetsResource:
 
 
 class FakeSheetsService:
-    def __init__(self) -> None:
+    def __init__(self, existing_sheet_titles: list[str] | None = None) -> None:
         self.values_resource = FakeValuesResource()
-        self.spreadsheets_resource = FakeSpreadsheetsResource(self.values_resource)
+        self.spreadsheets_resource = FakeSpreadsheetsResource(
+            self.values_resource,
+            existing_sheet_titles=existing_sheet_titles,
+        )
 
     def spreadsheets(self) -> FakeSpreadsheetsResource:
         return self.spreadsheets_resource
@@ -144,6 +155,24 @@ def test_setup_workbook_creates_sheets_and_headers() -> None:
         "body": {"values": [list(TRANSACTION_HEADERS)]},
     }
     assert any(call["range"] == "Dashboard!A2" for call in fake_service.values_resource.update_calls)
+
+
+def test_setup_workbook_skips_existing_sheets() -> None:
+    existing_titles = ["Lancamentos", "Contas", "Cartoes"]
+    fake_service = FakeSheetsService(existing_sheet_titles=existing_titles)
+    client = GoogleSheetsClient(service=fake_service, spreadsheet_id="sheet-id")
+
+    client.setup_workbook()
+
+    assert fake_service.spreadsheets_resource.batch_update_kwargs is not None
+    batch_body = fake_service.spreadsheets_resource.batch_update_kwargs["body"]
+    requested_titles = [
+        request["addSheet"]["properties"]["title"]
+        for request in batch_body["requests"]
+    ]
+    assert "Lancamentos" not in requested_titles
+    assert "Contas" not in requested_titles
+    assert "Dashboard" in requested_titles
 
 
 def test_update_financial_dashboard_updates_expected_ranges() -> None:
