@@ -85,3 +85,20 @@ def test_service_records_valid_transaction_with_warning() -> None:
     assert result.validation is not None
     assert result.validation.warnings == ("category_missing",)
     assert len(records) == 1
+
+
+def test_service_rejects_duplicate_transaction() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        repository = TransactionRepository(session)
+        service = make_service(repository)
+
+        first_result = service.record_from_text("Gastei R$ 45 no mercado hoje")
+        duplicate_result = service.record_from_text("Gastei R$ 45 no mercado hoje")
+        records = repository.list()
+
+    assert first_result.status == TransactionEntryStatus.RECORDED
+    assert duplicate_result.status == TransactionEntryStatus.DUPLICATE
+    assert duplicate_result.transaction_id == first_result.transaction_id
+    assert len(records) == 1

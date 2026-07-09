@@ -24,12 +24,13 @@ class TransactionRecord(Base):
     is_recurring: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )
 
     @classmethod
-    def from_draft(cls, draft: TransactionDraft) -> "TransactionRecord":
+    def from_draft(cls, draft: TransactionDraft, dedupe_key: str) -> "TransactionRecord":
         return cls(
             type=draft.type.value,
             amount=draft.amount,
@@ -42,6 +43,7 @@ class TransactionRecord(Base):
             is_recurring=draft.is_recurring,
             status=draft.status.value,
             confidence=Decimal(str(draft.confidence)),
+            dedupe_key=dedupe_key,
         )
 
     def to_draft(self) -> TransactionDraft:

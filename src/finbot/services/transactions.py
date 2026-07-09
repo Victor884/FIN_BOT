@@ -5,6 +5,7 @@ from finbot.db.models import TransactionRecord
 from finbot.db.repositories import TransactionRepository
 from finbot.models.transaction import TransactionDraft
 from finbot.parser.rules import RuleBasedParser
+from finbot.services.deduplication import build_transaction_dedupe_key
 from finbot.validation.transaction import ValidationResult, validate_transaction
 
 
@@ -12,6 +13,7 @@ class TransactionEntryStatus(StrEnum):
     RECORDED = "recorded"
     NEEDS_MORE_INFO = "needs_more_info"
     INVALID = "invalid"
+    DUPLICATE = "duplicate"
 
 
 @dataclass(frozen=True)
@@ -55,7 +57,18 @@ class TransactionEntryService:
                 validation=validation,
             )
 
-        record = self._repository.add(parse_result.draft)
+        dedupe_key = build_transaction_dedupe_key(parse_result.draft)
+        existing_record = self._repository.get_by_dedupe_key(dedupe_key)
+        if existing_record is not None:
+            return TransactionEntryResult(
+                status=TransactionEntryStatus.DUPLICATE,
+                message=_build_duplicate_message(existing_record),
+                transaction_id=existing_record.id,
+                draft=parse_result.draft,
+                validation=validation,
+            )
+
+        record = self._repository.add(parse_result.draft, dedupe_key=dedupe_key)
         return TransactionEntryResult(
             status=TransactionEntryStatus.RECORDED,
             message=_build_success_message(record),
@@ -81,3 +94,8 @@ def _build_validation_error_message(errors: tuple[str, ...]) -> str:
 def _build_success_message(record: TransactionRecord) -> str:
     amount = f"R$ {record.amount:.2f}".replace(".", ",")
     return f"Lancamento registrado: {amount} em {record.description}."
+
+
+def _build_duplicate_message(record: TransactionRecord) -> str:
+    amount = f"R$ {record.amount:.2f}".replace(".", ",")
+    return f"Este lancamento parece duplicado: {amount} em {record.description}."

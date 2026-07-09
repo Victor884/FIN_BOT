@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from finbot.db.base import Base
 from finbot.db.repositories import TransactionRepository
 from finbot.models.transaction import TransactionDraft, TransactionStatus, TransactionType
+from finbot.services.deduplication import build_transaction_dedupe_key
 
 
 def make_session_factory() -> sessionmaker:
@@ -33,7 +34,8 @@ def test_repository_adds_and_gets_transaction() -> None:
 
     with session_factory() as session:
         repository = TransactionRepository(session)
-        record = repository.add(make_draft())
+        draft = make_draft()
+        record = repository.add(draft, dedupe_key=build_transaction_dedupe_key(draft))
         session.commit()
 
         fetched = repository.get(record.id)
@@ -49,16 +51,19 @@ def test_repository_lists_latest_transactions_first() -> None:
 
     with session_factory() as session:
         repository = TransactionRepository(session)
-        old_record = repository.add(make_draft())
+        old_draft = make_draft()
+        old_record = repository.add(old_draft, dedupe_key=build_transaction_dedupe_key(old_draft))
+        new_draft = TransactionDraft(
+            type=TransactionType.INCOME,
+            amount=Decimal("2500"),
+            transaction_date=date(2026, 7, 9),
+            description="salario",
+            category="salario",
+            status=TransactionStatus.RECEIVED,
+        )
         new_record = repository.add(
-            TransactionDraft(
-                type=TransactionType.INCOME,
-                amount=Decimal("2500"),
-                transaction_date=date(2026, 7, 9),
-                description="salario",
-                category="salario",
-                status=TransactionStatus.RECEIVED,
-            )
+            new_draft,
+            dedupe_key=build_transaction_dedupe_key(new_draft),
         )
         session.commit()
 
@@ -72,7 +77,8 @@ def test_record_round_trips_to_draft() -> None:
 
     with session_factory() as session:
         repository = TransactionRepository(session)
-        record = repository.add(make_draft())
+        draft = make_draft()
+        record = repository.add(draft, dedupe_key=build_transaction_dedupe_key(draft))
         session.commit()
 
         draft = record.to_draft()
@@ -82,3 +88,19 @@ def test_record_round_trips_to_draft() -> None:
     assert draft.transaction_date == date(2026, 7, 8)
     assert draft.category == "alimentacao"
     assert draft.payment_method == "pix"
+
+
+def test_repository_gets_by_dedupe_key() -> None:
+    session_factory = make_session_factory()
+
+    with session_factory() as session:
+        repository = TransactionRepository(session)
+        draft = make_draft()
+        dedupe_key = build_transaction_dedupe_key(draft)
+        record = repository.add(draft, dedupe_key=dedupe_key)
+        session.commit()
+
+        fetched = repository.get_by_dedupe_key(dedupe_key)
+
+    assert fetched is not None
+    assert fetched.id == record.id

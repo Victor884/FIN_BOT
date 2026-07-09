@@ -9,14 +9,20 @@ class TransactionRepository:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def add(self, draft: TransactionDraft) -> TransactionRecord:
-        record = TransactionRecord.from_draft(draft)
+    def add(self, draft: TransactionDraft, dedupe_key: str) -> TransactionRecord:
+        record = TransactionRecord.from_draft(draft, dedupe_key)
         self._session.add(record)
         self._session.flush()
         return record
 
     def get(self, transaction_id: str) -> TransactionRecord | None:
         return self._session.get(TransactionRecord, transaction_id)
+
+    def get_by_dedupe_key(self, dedupe_key: str) -> TransactionRecord | None:
+        statement: Select[tuple[TransactionRecord]] = select(TransactionRecord).where(
+            TransactionRecord.dedupe_key == dedupe_key
+        )
+        return self._session.scalars(statement).first()
 
     def list(self, limit: int = 100) -> list[TransactionRecord]:
         statement: Select[tuple[TransactionRecord]] = (
@@ -25,4 +31,3 @@ class TransactionRepository:
             .limit(limit)
         )
         return list(self._session.scalars(statement))
-
