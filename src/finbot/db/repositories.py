@@ -5,8 +5,9 @@ from decimal import Decimal
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from finbot.db.models import AccountRecord, TransactionRecord
+from finbot.db.models import AccountRecord, CardRecord, TransactionRecord
 from finbot.models.account import AccountDraft
+from finbot.models.card import CardDraft
 from finbot.models.transaction import TransactionDraft
 
 
@@ -42,6 +43,42 @@ class AccountRepository:
         if record is None:
             return None
         record.current_balance += amount_delta
+        self._session.flush()
+        return record
+
+
+class CardRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, draft: CardDraft) -> CardRecord:
+        record = CardRecord.from_draft(draft)
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get(self, card_id: str) -> CardRecord | None:
+        return self._session.get(CardRecord, card_id)
+
+    def get_by_name(self, name: str) -> CardRecord | None:
+        statement: Select[tuple[CardRecord]] = select(CardRecord).where(
+            func.lower(CardRecord.name) == name.strip().lower()
+        )
+        return self._session.scalars(statement).first()
+
+    def list(self, active_only: bool = True) -> list[CardRecord]:
+        statement: Select[tuple[CardRecord]] = select(CardRecord).order_by(CardRecord.name.asc())
+        if active_only:
+            statement = statement.where(CardRecord.is_active.is_(True))
+        return list(self._session.scalars(statement))
+
+    def adjust_invoice(self, card_id: str, amount_delta: Decimal) -> CardRecord | None:
+        record = self.get(card_id)
+        if record is None:
+            return None
+        record.current_invoice += amount_delta
+        if record.current_invoice < 0:
+            record.current_invoice = Decimal("0")
         self._session.flush()
         return record
 

@@ -9,7 +9,7 @@ from finbot.api.app import create_app
 from finbot.api.routes import telegram
 from finbot.core.settings import Settings
 from finbot.db.base import Base
-from finbot.db.repositories import TransactionRepository
+from finbot.db.repositories import CardRepository, TransactionRepository
 from finbot.parser.rules import RuleBasedParser
 from finbot.db.repositories import AccountRepository
 from finbot.services.messages import BotMessageService
@@ -44,15 +44,18 @@ def make_bot_service(session: Session) -> BotMessageService:
     parser = RuleBasedParser(today_provider=lambda: date(2026, 7, 9))
     transaction_repository = TransactionRepository(session)
     account_repository = AccountRepository(session)
+    card_repository = CardRepository(session)
     transaction_service = TransactionEntryService(
         repository=transaction_repository,
         parser=parser,
         account_repository=account_repository,
+        card_repository=card_repository,
     )
     return BotMessageService(
         transaction_service=transaction_service,
         transaction_repository=transaction_repository,
         account_repository=account_repository,
+        card_repository=card_repository,
     )
 
 

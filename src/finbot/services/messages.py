@@ -5,9 +5,10 @@ from datetime import date
 from decimal import Decimal
 
 from finbot.db.models import TransactionRecord
-from finbot.db.repositories import AccountRepository, TransactionRepository
+from finbot.db.repositories import AccountRepository, CardRepository, TransactionRepository
 from finbot.models.transaction import TransactionType
 from finbot.services.accounts import AccountService, format_money
+from finbot.services.cards import CardService
 from finbot.services.transactions import TransactionEntryResult, TransactionEntryService
 
 logger = logging.getLogger(__name__)
@@ -27,11 +28,13 @@ class BotMessageService:
         transaction_service: TransactionEntryService,
         transaction_repository: TransactionRepository,
         account_repository: AccountRepository,
+        card_repository: CardRepository | None = None,
     ) -> None:
         self._transaction_service = transaction_service
         self._transaction_repository = transaction_repository
         self._account_repository = account_repository
         self._account_service = AccountService(account_repository)
+        self._card_service = CardService(card_repository, account_repository) if card_repository else None
 
     def handle_text(self, text: str) -> BotMessageResult:
         stripped = text.strip()
@@ -41,6 +44,15 @@ class BotMessageService:
         account_message = self._account_service.try_add_from_natural_text(stripped)
         if account_message is not None:
             return BotMessageResult(status="account_added", message=account_message)
+
+        if self._card_service is not None:
+            invoice_payment_message = self._card_service.pay_invoice_from_text(stripped)
+            if invoice_payment_message is not None:
+                return BotMessageResult(status="invoice_paid", message=invoice_payment_message)
+
+            card_message = self._card_service.try_add_from_natural_text(stripped)
+            if card_message is not None:
+                return BotMessageResult(status="card_added", message=card_message)
 
         items = split_financial_entries(stripped)
         logger.info("telegram_message_split count=%s is_multiple=%s", len(items), len(items) > 1)
@@ -73,6 +85,12 @@ class BotMessageService:
             return BotMessageResult(status="account_added", message=self._account_service.add_from_command(text))
         if command == "/saldo":
             return BotMessageResult(status="balance", message=self._account_service.balance_message(args or None))
+        if command == "/cartoes":
+            return BotMessageResult(status="cards", message=self._cards_message())
+        if command == "/addcartao":
+            return BotMessageResult(status="card_added", message=self._add_card_message(text))
+        if command == "/fatura":
+            return BotMessageResult(status="invoice", message=self._invoice_message(args or None))
         if command == "/relatorio":
             return BotMessageResult(status="account_report", message=self._account_report(args))
         if command == "/relatoriogeral":
@@ -83,6 +101,21 @@ class BotMessageService:
             return BotMessageResult(status="help", message=help_message())
 
         return BotMessageResult(status="unknown_command", message="Comando nao reconhecido. Use /ajuda.")
+
+    def _cards_message(self) -> str:
+        if self._card_service is None:
+            return "Modulo de cartoes indisponivel."
+        return self._card_service.list_cards()
+
+    def _add_card_message(self, text: str) -> str:
+        if self._card_service is None:
+            return "Modulo de cartoes indisponivel."
+        return self._card_service.add_from_command(text)
+
+    def _invoice_message(self, card_text: str | None) -> str:
+        if self._card_service is None:
+            return "Modulo de cartoes indisponivel."
+        return self._card_service.invoice_message(card_text)
 
     def _account_report(self, account_text: str) -> str:
         if not account_text:
@@ -260,6 +293,9 @@ def help_message() -> str:
         "- /addconta Banco Inter banco saldo 1000\n"
         "- /contas\n"
         "- /saldo Inter\n"
+        "- /addcartao Nubank credito conta Nubank limite 2000\n"
+        "- /cartoes\n"
+        "- /fatura Nubank\n"
         "- /relatorio Nubank\n"
         "- /relatoriogeral"
     )

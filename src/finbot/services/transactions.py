@@ -2,7 +2,8 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 
 from finbot.db.models import TransactionRecord
-from finbot.db.repositories import AccountRepository, TransactionRepository
+from finbot.db.repositories import AccountRepository, CardRepository, TransactionRepository
+from finbot.models.card import CardType
 from finbot.models.transaction import TransactionDraft, TransactionType
 from finbot.parser.contracts import FinancialParser
 from finbot.parser.rules import RuleBasedParser
@@ -39,10 +40,12 @@ class TransactionEntryService:
         repository: TransactionRepository,
         parser: FinancialParser | None = None,
         account_repository: AccountRepository | None = None,
+        card_repository: CardRepository | None = None,
     ) -> None:
         self._repository = repository
         self._parser = parser or RuleBasedParser()
         self._account_repository = account_repository
+        self._card_repository = card_repository
         self._account_resolver = (
             AccountResolver(account_repository) if account_repository is not None else None
         )
@@ -57,6 +60,7 @@ class TransactionEntryService:
             )
 
         draft = self._resolve_accounts(parse_result.draft)
+        draft = self._resolve_card(text, draft)
         missing_transfer_message = self._build_missing_transfer_account_message(draft)
         if missing_transfer_message:
             return TransactionEntryResult(
@@ -160,6 +164,46 @@ class TransactionEntryService:
                 self._account_repository.adjust_balance(origin.id, -record.amount)
             if destination:
                 self._account_repository.adjust_balance(destination.id, record.amount)
+
+        if (
+            self._card_repository is not None
+            and record.type == TransactionType.EXPENSE.value
+            and record.card_name
+        ):
+            card = self._card_repository.get_by_name(record.card_name)
+            if card and card.type == CardType.CREDIT.value:
+                self._card_repository.adjust_invoice(card.id, record.amount)
+
+    def _resolve_card(self, text: str, draft: TransactionDraft) -> TransactionDraft:
+        if self._card_repository is None or draft.type != TransactionType.EXPENSE:
+            return draft
+
+        normalized_text = text.lower()
+        for card in self._card_repository.list():
+            normalized_card = card.name.lower().replace("cartao ", "").strip()
+            if card.name.lower() not in normalized_text and normalized_card not in normalized_text:
+                continue
+
+            if card.type == CardType.CREDIT.value:
+                return replace(
+                    draft,
+                    card_name=card.name,
+                    payment_method="cartao_credito",
+                    account_from=None,
+                )
+
+            account_name = draft.account_from
+            if self._account_repository and card.linked_account_id:
+                account = self._account_repository.get(card.linked_account_id)
+                account_name = account.name if account else account_name
+            return replace(
+                draft,
+                card_name=card.name,
+                payment_method="cartao_debito",
+                account_from=account_name,
+            )
+
+        return draft
 
 
 def _build_missing_fields_message(missing_fields: tuple[str, ...]) -> str:

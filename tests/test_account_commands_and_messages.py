@@ -4,38 +4,42 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from finbot.db.base import Base
-from finbot.db.repositories import AccountRepository, TransactionRepository
+from finbot.db.repositories import AccountRepository, CardRepository, TransactionRepository
 from finbot.parser.rules import RuleBasedParser
 from finbot.services.messages import BotMessageService, split_financial_entries
 from finbot.services.transactions import TransactionEntryService
 
 
-def make_service() -> tuple[BotMessageService, AccountRepository, TransactionRepository]:
+def make_service() -> tuple[BotMessageService, AccountRepository, TransactionRepository, CardRepository]:
     engine = create_engine("sqlite:///:memory:", future=True)
     Base.metadata.create_all(bind=engine)
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
     session = session_factory()
     account_repository = AccountRepository(session)
+    card_repository = CardRepository(session)
     transaction_repository = TransactionRepository(session)
     parser = RuleBasedParser(today_provider=lambda: date(2026, 7, 9))
     transaction_service = TransactionEntryService(
         repository=transaction_repository,
         parser=parser,
         account_repository=account_repository,
+        card_repository=card_repository,
     )
     return (
         BotMessageService(
             transaction_service=transaction_service,
             transaction_repository=transaction_repository,
             account_repository=account_repository,
+            card_repository=card_repository,
         ),
         account_repository,
         transaction_repository,
+        card_repository,
     )
 
 
 def test_add_and_list_accounts() -> None:
-    service, _, _ = make_service()
+    service, _, _, _ = make_service()
 
     add_message = service.handle_text("/addconta Banco Inter banco saldo 1000").message
     list_message = service.handle_text("/contas").message
@@ -46,7 +50,7 @@ def test_add_and_list_accounts() -> None:
 
 
 def test_add_account_from_natural_text_with_name_and_balance() -> None:
-    service, account_repository, _ = make_service()
+    service, account_repository, _, _ = make_service()
 
     message = service.handle_text("Crie uma conta chamada Banco Inter com saldo inicial de R$ 500").message
     account = account_repository.get_by_name("Banco Inter")
@@ -58,7 +62,7 @@ def test_add_account_from_natural_text_with_name_and_balance() -> None:
 
 
 def test_add_wallet_from_natural_balance_sentence() -> None:
-    service, account_repository, _ = make_service()
+    service, account_repository, _, _ = make_service()
 
     message = service.handle_text("Tenho R$ 300 no Mercado Pago").message
     account = account_repository.get_by_name("Mercado Pago")
@@ -69,7 +73,7 @@ def test_add_wallet_from_natural_balance_sentence() -> None:
 
 
 def test_add_account_from_natural_text_asks_missing_balance() -> None:
-    service, account_repository, _ = make_service()
+    service, account_repository, _, _ = make_service()
 
     result = service.handle_text("Criar conta Nubank")
 
@@ -79,7 +83,7 @@ def test_add_account_from_natural_text_asks_missing_balance() -> None:
 
 
 def test_balance_general_and_by_account() -> None:
-    service, _, _ = make_service()
+    service, _, _, _ = make_service()
     service.handle_text("/addconta Banco Inter banco saldo 1000")
     service.handle_text("/addconta Nubank banco saldo 500")
 
@@ -87,8 +91,86 @@ def test_balance_general_and_by_account() -> None:
     assert service.handle_text("/saldo inter").message == "Saldo de Banco Inter: R$ 1000,00."
 
 
+def test_add_and_list_credit_card() -> None:
+    service, _, _, card_repository = make_service()
+    service.handle_text("/addconta Nubank banco saldo 500")
+
+    message = service.handle_text("/addcartao Nubank credito conta Nubank limite 2000").message
+    cards_message = service.handle_text("/cartoes").message
+    card = card_repository.get_by_name("Cartao Nubank")
+
+    assert message == "Cartao cadastrado: Cartao Nubank credito vinculado a Nubank."
+    assert card is not None
+    assert card.limit.to_eng_string() == "2000.00"
+    assert "Cartao Nubank: credito vinculado a Nubank - fatura R$ 0,00" in cards_message
+
+
+def test_add_debit_card_from_natural_text() -> None:
+    service, _, _, card_repository = make_service()
+    service.handle_text("/addconta Banco Inter banco saldo 1000")
+
+    message = service.handle_text("Adicionar cartao Inter debito associado ao Banco Inter").message
+    card = card_repository.get_by_name("Cartao Inter")
+
+    assert message == "Cartao cadastrado: Cartao Inter debito vinculado a Banco Inter."
+    assert card is not None
+    assert card.type == "debito"
+
+
+def test_credit_card_expense_increases_invoice_without_changing_balance() -> None:
+    service, account_repository, transaction_repository, card_repository = make_service()
+    service.handle_text("/addconta Nubank banco saldo 500")
+    service.handle_text("/addcartao Nubank credito conta Nubank limite 2000")
+
+    result = service.handle_text("Gastei R$ 120 no mercado no cartao Nubank credito")
+    card = card_repository.get_by_name("Cartao Nubank")
+    account = account_repository.get_by_name("Nubank")
+    record = transaction_repository.list()[0]
+
+    assert result.status == "recorded"
+    assert card is not None
+    assert card.current_invoice.to_eng_string() == "120.00"
+    assert account is not None
+    assert account.current_balance.to_eng_string() == "500.00"
+    assert record.card_name == "Cartao Nubank"
+    assert record.payment_method == "cartao_credito"
+
+
+def test_debit_card_expense_changes_linked_account_balance() -> None:
+    service, account_repository, _, _ = make_service()
+    service.handle_text("/addconta Banco Inter banco saldo 1000")
+    service.handle_text("/addcartao Inter debito conta Banco Inter")
+
+    service.handle_text("Gastei R$ 80 no mercado no cartao Inter debito")
+    account = account_repository.get_by_name("Banco Inter")
+
+    assert account is not None
+    assert account.current_balance.to_eng_string() == "920.00"
+
+
+def test_pay_credit_card_invoice() -> None:
+    service, account_repository, _, card_repository = make_service()
+    service.handle_text("/addconta Nubank banco saldo 500")
+    service.handle_text("/addconta Banco Inter banco saldo 1000")
+    service.handle_text("/addcartao Nubank credito conta Nubank limite 2000")
+    service.handle_text("Gastei R$ 120 no mercado no cartao Nubank credito")
+
+    message = service.handle_text("Paguei fatura Nubank R$ 50 com Banco Inter").message
+    card = card_repository.get_by_name("Cartao Nubank")
+    account = account_repository.get_by_name("Banco Inter")
+
+    assert message == (
+        "Pagamento de fatura registrado: R$ 50,00 do cartao Cartao Nubank, "
+        "pago pela conta Banco Inter."
+    )
+    assert card is not None
+    assert card.current_invoice.to_eng_string() == "70.00"
+    assert account is not None
+    assert account.current_balance.to_eng_string() == "950.00"
+
+
 def test_transfer_with_explicit_origin_and_destination_updates_balances() -> None:
-    service, account_repository, transaction_repository = make_service()
+    service, account_repository, transaction_repository, _ = make_service()
     service.handle_text("/addconta Banco Inter banco saldo 1000")
     service.handle_text("/addconta Mercado Pago carteira saldo 100")
 
@@ -105,7 +187,7 @@ def test_transfer_with_explicit_origin_and_destination_updates_balances() -> Non
 
 
 def test_transfer_without_origin_asks_only_origin() -> None:
-    service, _, transaction_repository = make_service()
+    service, _, transaction_repository, _ = make_service()
     service.handle_text("/addconta Poupanca poupanca saldo 0")
 
     result = service.handle_text("Mandei R$ 400 para a poupanca hoje")
@@ -119,7 +201,7 @@ def test_transfer_without_origin_asks_only_origin() -> None:
 
 
 def test_ambiguous_wallet_transfer_asks_destination() -> None:
-    service, _, transaction_repository = make_service()
+    service, _, transaction_repository, _ = make_service()
     service.handle_text("/addconta Mercado Pago carteira saldo 0")
     service.handle_text("/addconta Carteira fisica carteira saldo 0")
 
@@ -133,7 +215,7 @@ def test_ambiguous_wallet_transfer_asks_destination() -> None:
 
 
 def test_multiple_entries_by_newline_are_recorded_separately() -> None:
-    service, _, transaction_repository = make_service()
+    service, _, transaction_repository, _ = make_service()
 
     result = service.handle_text(
         "Gastei R$ 45 no mercado, categoria alimentacao\n"
@@ -161,7 +243,7 @@ def test_multiple_entries_by_pipe_and_semicolon_are_split() -> None:
 
 
 def test_invalid_message_returns_friendly_help() -> None:
-    service, _, _ = make_service()
+    service, _, _, _ = make_service()
 
     result = service.handle_text("v")
 

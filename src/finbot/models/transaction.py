@@ -27,7 +27,7 @@ class TransactionDraft:
     payment_method: str | None = None
     account_from: str | None = None
     account_to: str | None = None
+    card_name: str | None = None
     is_recurring: bool = False
     status: TransactionStatus = TransactionStatus.PAID
     confidence: float = 1.0
-

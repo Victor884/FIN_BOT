@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from finbot.db.base import Base
 from finbot.models.account import AccountDraft, AccountType
+from finbot.models.card import CardDraft, CardType
 from finbot.models.transaction import TransactionDraft, TransactionStatus, TransactionType
 
 
@@ -41,6 +42,40 @@ class AccountRecord(Base):
         return AccountType(self.type)
 
 
+class CardRecord(Base):
+    __tablename__ = "cards"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    linked_account_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    limit: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    closing_day: Mapped[int | None] = mapped_column(nullable=True)
+    due_day: Mapped[int | None] = mapped_column(nullable=True)
+    current_invoice: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    @classmethod
+    def from_draft(cls, draft: CardDraft) -> "CardRecord":
+        return cls(
+            name=draft.name,
+            type=draft.type.value,
+            linked_account_id=draft.linked_account_id,
+            limit=draft.limit,
+            closing_day=draft.closing_day,
+            due_day=draft.due_day,
+            current_invoice=draft.current_invoice,
+            is_active=draft.is_active,
+        )
+
+    @property
+    def card_type(self) -> CardType:
+        return CardType(self.type)
+
+
 class TransactionRecord(Base):
     __tablename__ = "transactions"
 
@@ -53,6 +88,7 @@ class TransactionRecord(Base):
     payment_method: Mapped[str | None] = mapped_column(String(80), nullable=True)
     account_from: Mapped[str | None] = mapped_column(String(120), nullable=True)
     account_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    card_name: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     is_recurring: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
@@ -72,6 +108,7 @@ class TransactionRecord(Base):
             payment_method=draft.payment_method,
             account_from=draft.account_from,
             account_to=draft.account_to,
+            card_name=draft.card_name,
             is_recurring=draft.is_recurring,
             status=draft.status.value,
             confidence=Decimal(str(draft.confidence)),
@@ -88,6 +125,7 @@ class TransactionRecord(Base):
             payment_method=self.payment_method,
             account_from=self.account_from,
             account_to=self.account_to,
+            card_name=self.card_name,
             is_recurring=self.is_recurring,
             status=TransactionStatus(self.status),
             confidence=float(self.confidence),

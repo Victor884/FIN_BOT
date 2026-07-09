@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from finbot.core.settings import Settings
-from finbot.db.repositories import AccountRepository, TransactionRepository
+from finbot.db.repositories import AccountRepository, CardRepository, TransactionRepository
 from finbot.db.session import create_database_schema, create_session_factory
 from finbot.parser.factory import build_financial_parser
 from finbot.sheets.client import GoogleSheetsClient
@@ -30,11 +30,13 @@ def get_transaction_entry_service(
         try:
             repository = TransactionRepository(session)
             account_repository = AccountRepository(session)
+            card_repository = CardRepository(session)
             parser = build_financial_parser(settings)
             yield TransactionEntryService(
                 repository=repository,
                 parser=parser,
                 account_repository=account_repository,
+                card_repository=card_repository,
             )
             session.commit()
         except Exception:
@@ -51,16 +53,19 @@ def get_bot_message_service(
         try:
             transaction_repository = TransactionRepository(session)
             account_repository = AccountRepository(session)
+            card_repository = CardRepository(session)
             parser = build_financial_parser(settings)
             transaction_service = TransactionEntryService(
                 repository=transaction_repository,
                 parser=parser,
                 account_repository=account_repository,
+                card_repository=card_repository,
             )
             yield BotMessageService(
                 transaction_service=transaction_service,
                 transaction_repository=transaction_repository,
                 account_repository=account_repository,
+                card_repository=card_repository,
             )
             session.commit()
         except Exception:
