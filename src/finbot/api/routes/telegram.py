@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from finbot.core.settings import Settings
 from finbot.db.repositories import TransactionRepository
 from finbot.db.session import create_database_schema, create_session_factory
+from finbot.parser.factory import build_financial_parser
 from finbot.services.transactions import TransactionEntryService
 from finbot.telegram.schemas import TelegramUpdate
 
@@ -22,7 +23,8 @@ def get_transaction_entry_service(
     session_factory = create_session_factory(settings)
     with session_factory() as session:
         repository = TransactionRepository(session)
-        yield TransactionEntryService(repository=repository)
+        parser = build_financial_parser(settings)
+        yield TransactionEntryService(repository=repository, parser=parser)
         session.commit()
 
 

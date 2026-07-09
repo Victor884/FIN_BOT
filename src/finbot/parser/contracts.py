@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Protocol
 
 from finbot.models.transaction import TransactionDraft
 
@@ -10,3 +11,7 @@ class ParseResult:
     needs_confirmation: bool = False
     raw_text: str = ""
 
+
+class FinancialParser(Protocol):
+    def parse(self, text: str) -> ParseResult:
+        pass

@@ -4,6 +4,7 @@ from enum import StrEnum
 from finbot.db.models import TransactionRecord
 from finbot.db.repositories import TransactionRepository
 from finbot.models.transaction import TransactionDraft
+from finbot.parser.contracts import FinancialParser
 from finbot.parser.rules import RuleBasedParser
 from finbot.services.deduplication import build_transaction_dedupe_key
 from finbot.validation.transaction import ValidationResult, validate_transaction
@@ -34,7 +35,7 @@ class TransactionEntryService:
     def __init__(
         self,
         repository: TransactionRepository,
-        parser: RuleBasedParser | None = None,
+        parser: FinancialParser | None = None,
     ) -> None:
         self._repository = repository
         self._parser = parser or RuleBasedParser()

@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     telegram_webhook_secret: str | None = None
     openai_api_key: str | None = None
     openai_model: str = "gpt-5.4-nano"
+    openai_base_url: str = "https://api.openai.com/v1"
     ai_provider: str = "openai"
     ai_enabled: bool = False
     google_sheets_spreadsheet_id: str | None = None
     google_service_account_file: str | None = None
     log_level: str = "INFO"
-
