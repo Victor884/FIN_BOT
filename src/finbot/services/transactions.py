@@ -22,6 +22,7 @@ class TransactionEntryResult:
     status: TransactionEntryStatus
     message: str
     transaction_id: str | None = None
+    record: TransactionRecord | None = None
     draft: TransactionDraft | None = None
     missing_fields: tuple[str, ...] = ()
     validation: ValidationResult | None = None
@@ -65,6 +66,7 @@ class TransactionEntryService:
                 status=TransactionEntryStatus.DUPLICATE,
                 message=_build_duplicate_message(existing_record),
                 transaction_id=existing_record.id,
+                record=existing_record,
                 draft=parse_result.draft,
                 validation=validation,
             )
@@ -74,6 +76,7 @@ class TransactionEntryService:
             status=TransactionEntryStatus.RECORDED,
             message=_build_success_message(record),
             transaction_id=record.id,
+            record=record,
             draft=parse_result.draft,
             validation=validation,
         )

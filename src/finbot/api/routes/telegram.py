@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -6,10 +7,13 @@ from finbot.core.settings import Settings
 from finbot.db.repositories import TransactionRepository
 from finbot.db.session import create_database_schema, create_session_factory
 from finbot.parser.factory import build_financial_parser
+from finbot.sheets.client import GoogleSheetsClient
 from finbot.services.transactions import TransactionEntryService
+from finbot.telegram.client import TelegramClient
 from finbot.telegram.schemas import TelegramUpdate
 
 router = APIRouter(prefix="/telegram", tags=["telegram"])
+logger = logging.getLogger(__name__)
 
 
 def get_settings() -> Settings:
@@ -32,12 +36,26 @@ def get_transaction_entry_service(
             raise
 
 
+def get_telegram_client(settings: Settings = Depends(get_settings)) -> TelegramClient | None:
+    if not settings.telegram_bot_token:
+        return None
+    return TelegramClient.from_settings(settings)
+
+
+def get_google_sheets_client(settings: Settings = Depends(get_settings)) -> GoogleSheetsClient | None:
+    if not settings.google_sheets_spreadsheet_id or not settings.google_service_account_file:
+        return None
+    return GoogleSheetsClient.from_settings(settings)
+
+
 @router.post("/webhook", status_code=status.HTTP_202_ACCEPTED)
 async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
     service: TransactionEntryService = Depends(get_transaction_entry_service),
+    telegram_client: TelegramClient | None = Depends(get_telegram_client),
+    sheets_client: GoogleSheetsClient | None = Depends(get_google_sheets_client),
 ) -> dict[str, object]:
     if settings.telegram_webhook_secret:
         if x_telegram_bot_api_secret_token != settings.telegram_webhook_secret:
@@ -53,12 +71,30 @@ async def telegram_webhook(
         return {"status": "ignored", "update_id": update.update_id, "reason": "message_text_missing"}
 
     result = service.record_from_text(update.message.text)
+    sheet_synced = False
+    telegram_replied = False
+
+    if result.is_recorded and result.record is not None and sheets_client is not None:
+        try:
+            sheets_client.append_transaction(result.record)
+            sheet_synced = True
+        except Exception:
+            logger.exception("google_sheets_sync_failed transaction_id=%s", result.transaction_id)
+
+    if telegram_client is not None:
+        try:
+            telegram_client.send_message(chat_id=update.message.chat.id, text=result.message)
+            telegram_replied = True
+        except Exception:
+            logger.exception("telegram_send_message_failed chat_id=%s", update.message.chat.id)
 
     return {
         "status": result.status.value,
         "update_id": update.update_id,
         "message": result.message,
         "transaction_id": result.transaction_id,
+        "sheet_synced": sheet_synced,
+        "telegram_replied": telegram_replied,
         "missing_fields": list(result.missing_fields),
         "errors": list(result.validation.errors) if result.validation else [],
         "warnings": list(result.validation.warnings) if result.validation else [],
