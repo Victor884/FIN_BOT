@@ -1,0 +1,13 @@
+.git
+.agents
+.pytest_cache
+.ruff_cache
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.*
+!.env.example
+data
+logs
+

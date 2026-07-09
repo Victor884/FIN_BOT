@@ -123,6 +123,10 @@ python -m pytest
 python -m ruff check .
 ```
 
+## Deploy E Credenciais
+
+O guia completo de credenciais, configuracao local, webhook do Telegram, Google Sheets e deploy esta em `docs/deploy.md`.
+
 ## Politica De Seguranca
 
 - Nunca commitar `.env`, tokens, chaves ou credenciais.

@@ -23,6 +23,9 @@ data/
 logs/
 *.log
 
+credentials/
+*.service-account.json
+
 .idea/
 .vscode/
 .DS_Store
