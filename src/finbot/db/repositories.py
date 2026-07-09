@@ -1,10 +1,49 @@
 from datetime import date
 
-from sqlalchemy import Select, select
+from decimal import Decimal
+
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from finbot.db.models import TransactionRecord
+from finbot.db.models import AccountRecord, TransactionRecord
+from finbot.models.account import AccountDraft
 from finbot.models.transaction import TransactionDraft
+
+
+class AccountRepository:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, draft: AccountDraft) -> AccountRecord:
+        record = AccountRecord.from_draft(draft)
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get(self, account_id: str) -> AccountRecord | None:
+        return self._session.get(AccountRecord, account_id)
+
+    def get_by_name(self, name: str) -> AccountRecord | None:
+        statement: Select[tuple[AccountRecord]] = select(AccountRecord).where(
+            func.lower(AccountRecord.name) == name.strip().lower()
+        )
+        return self._session.scalars(statement).first()
+
+    def list(self, active_only: bool = True) -> list[AccountRecord]:
+        statement: Select[tuple[AccountRecord]] = select(AccountRecord).order_by(
+            AccountRecord.name.asc()
+        )
+        if active_only:
+            statement = statement.where(AccountRecord.is_active.is_(True))
+        return list(self._session.scalars(statement))
+
+    def adjust_balance(self, account_id: str, amount_delta: Decimal) -> AccountRecord | None:
+        record = self.get(account_id)
+        if record is None:
+            return None
+        record.current_balance += amount_delta
+        self._session.flush()
+        return record
 
 
 class TransactionRepository:
@@ -48,5 +87,17 @@ class TransactionRepository:
             select(TransactionRecord)
             .where(TransactionRecord.status == "pending")
             .order_by(TransactionRecord.transaction_date.asc(), TransactionRecord.created_at.asc())
+        )
+        return list(self._session.scalars(statement))
+
+    def list_by_account(self, account_name: str, limit: int = 100) -> list[TransactionRecord]:
+        statement: Select[tuple[TransactionRecord]] = (
+            select(TransactionRecord)
+            .where(
+                (TransactionRecord.account_from == account_name)
+                | (TransactionRecord.account_to == account_name)
+            )
+            .order_by(TransactionRecord.transaction_date.desc(), TransactionRecord.created_at.desc())
+            .limit(limit)
         )
         return list(self._session.scalars(statement))

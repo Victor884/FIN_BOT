@@ -6,7 +6,39 @@ from sqlalchemy import Boolean, Date, DateTime, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from finbot.db.base import Base
+from finbot.models.account import AccountDraft, AccountType
 from finbot.models.transaction import TransactionDraft, TransactionStatus, TransactionType
+
+
+class AccountRecord(Base):
+    __tablename__ = "accounts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    name: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
+    type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    initial_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    current_balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+    @classmethod
+    def from_draft(cls, draft: AccountDraft) -> "AccountRecord":
+        current_balance = draft.current_balance
+        if current_balance is None:
+            current_balance = draft.initial_balance
+        return cls(
+            name=draft.name,
+            type=draft.type.value,
+            initial_balance=draft.initial_balance,
+            current_balance=current_balance,
+            is_active=draft.is_active,
+        )
+
+    @property
+    def account_type(self) -> AccountType:
+        return AccountType(self.type)
 
 
 class TransactionRecord(Base):

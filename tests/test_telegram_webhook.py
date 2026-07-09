@@ -11,6 +11,8 @@ from finbot.core.settings import Settings
 from finbot.db.base import Base
 from finbot.db.repositories import TransactionRepository
 from finbot.parser.rules import RuleBasedParser
+from finbot.db.repositories import AccountRepository
+from finbot.services.messages import BotMessageService
 from finbot.services.transactions import TransactionEntryService
 
 
@@ -38,6 +40,22 @@ def make_service(session: Session) -> TransactionEntryService:
     return TransactionEntryService(repository=repository, parser=parser)
 
 
+def make_bot_service(session: Session) -> BotMessageService:
+    parser = RuleBasedParser(today_provider=lambda: date(2026, 7, 9))
+    transaction_repository = TransactionRepository(session)
+    account_repository = AccountRepository(session)
+    transaction_service = TransactionEntryService(
+        repository=transaction_repository,
+        parser=parser,
+        account_repository=account_repository,
+    )
+    return BotMessageService(
+        transaction_service=transaction_service,
+        transaction_repository=transaction_repository,
+        account_repository=account_repository,
+    )
+
+
 def make_client(
     webhook_secret: str | None = None,
     telegram_client: FakeTelegramClient | None = None,
@@ -58,6 +76,7 @@ def make_client(
         telegram_webhook_secret=webhook_secret
     )
     app.dependency_overrides[telegram.get_transaction_entry_service] = lambda: make_service(session)
+    app.dependency_overrides[telegram.get_bot_message_service] = lambda: make_bot_service(session)
     app.dependency_overrides[telegram.get_telegram_client] = lambda: telegram_client
     app.dependency_overrides[telegram.get_google_sheets_client] = lambda: sheets_client
     return TestClient(app)
@@ -86,12 +105,14 @@ def test_telegram_webhook_records_valid_update() -> None:
     assert response.status_code == 202
     assert body["status"] == "recorded"
     assert body["update_id"] == 123
-    assert body["transaction_id"] is not None
+    assert body["transaction_ids"][0] is not None
     assert body["sheet_synced"] is True
     assert body["telegram_replied"] is True
     assert body["errors"] == []
-    assert fake_sheets.appended_ids == [body["transaction_id"]]
-    assert fake_telegram.messages == [(456, "Lancamento registrado: R$ 45,00 em mercado.")]
+    assert fake_sheets.appended_ids == [body["transaction_ids"][0]]
+    assert fake_telegram.messages == [
+        (456, "Lancamento registrado: Despesa de R$ 45,00 - mercado - Categoria: alimentacao.")
+    ]
 
 
 def test_telegram_webhook_returns_missing_fields() -> None:
@@ -114,11 +135,13 @@ def test_telegram_webhook_returns_missing_fields() -> None:
 
     assert response.status_code == 202
     assert response.json()["status"] == "needs_more_info"
-    assert response.json()["missing_fields"] == ["amount"]
+    assert response.json()["missing_fields"] == [["amount"]]
     assert response.json()["sheet_synced"] is False
     assert response.json()["telegram_replied"] is True
     assert fake_sheets.appended_ids == []
-    assert fake_telegram.messages == [(456, "Faltam dados para registrar a movimentacao: amount.")]
+    assert fake_telegram.messages == [
+        (456, "Entendi a movimentacao, mas faltou o valor. Qual foi o valor?")
+    ]
 
 
 def test_telegram_webhook_ignores_update_without_text() -> None:

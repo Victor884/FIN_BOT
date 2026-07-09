@@ -1,0 +1,138 @@
+from datetime import date
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from finbot.db.base import Base
+from finbot.db.repositories import AccountRepository, TransactionRepository
+from finbot.parser.rules import RuleBasedParser
+from finbot.services.messages import BotMessageService, split_financial_entries
+from finbot.services.transactions import TransactionEntryService
+
+
+def make_service() -> tuple[BotMessageService, AccountRepository, TransactionRepository]:
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+    account_repository = AccountRepository(session)
+    transaction_repository = TransactionRepository(session)
+    parser = RuleBasedParser(today_provider=lambda: date(2026, 7, 9))
+    transaction_service = TransactionEntryService(
+        repository=transaction_repository,
+        parser=parser,
+        account_repository=account_repository,
+    )
+    return (
+        BotMessageService(
+            transaction_service=transaction_service,
+            transaction_repository=transaction_repository,
+            account_repository=account_repository,
+        ),
+        account_repository,
+        transaction_repository,
+    )
+
+
+def test_add_and_list_accounts() -> None:
+    service, _, _ = make_service()
+
+    add_message = service.handle_text("/addconta Banco Inter banco saldo 1000").message
+    list_message = service.handle_text("/contas").message
+
+    assert "Conta cadastrada: Banco Inter" in add_message
+    assert "Banco Inter: R$ 1000,00" in list_message
+    assert "Saldo total: R$ 1000,00" in list_message
+
+
+def test_balance_general_and_by_account() -> None:
+    service, _, _ = make_service()
+    service.handle_text("/addconta Banco Inter banco saldo 1000")
+    service.handle_text("/addconta Nubank banco saldo 500")
+
+    assert service.handle_text("/saldo").message == "Saldo total: R$ 1500,00."
+    assert service.handle_text("/saldo inter").message == "Saldo de Banco Inter: R$ 1000,00."
+
+
+def test_transfer_with_explicit_origin_and_destination_updates_balances() -> None:
+    service, account_repository, transaction_repository = make_service()
+    service.handle_text("/addconta Banco Inter banco saldo 1000")
+    service.handle_text("/addconta Mercado Pago carteira saldo 100")
+
+    result = service.handle_text("Transferi R$ 60 do banco Inter para a carteira do Mercado Pago")
+    accounts = {account.name: account.current_balance for account in account_repository.list()}
+    records = transaction_repository.list()
+
+    assert result.status == "recorded"
+    assert "Transferencia registrada" in result.message
+    assert records[0].account_from == "Banco Inter"
+    assert records[0].account_to == "Mercado Pago"
+    assert accounts["Banco Inter"].to_eng_string() == "940.00"
+    assert accounts["Mercado Pago"].to_eng_string() == "160.00"
+
+
+def test_transfer_without_origin_asks_only_origin() -> None:
+    service, _, transaction_repository = make_service()
+    service.handle_text("/addconta Poupanca poupanca saldo 0")
+
+    result = service.handle_text("Mandei R$ 400 para a poupanca hoje")
+
+    assert result.status == "needs_more_info"
+    assert result.message == (
+        "Entendi que e uma transferencia de R$ 400,00 para Poupanca. "
+        "De qual conta saiu esse valor?"
+    )
+    assert transaction_repository.list() == []
+
+
+def test_ambiguous_wallet_transfer_asks_destination() -> None:
+    service, _, transaction_repository = make_service()
+    service.handle_text("/addconta Mercado Pago carteira saldo 0")
+    service.handle_text("/addconta Carteira fisica carteira saldo 0")
+
+    result = service.handle_text("Transferi R$ 75 para minha carteira digital")
+
+    assert result.status == "needs_more_info"
+    assert "qual conta" in result.message
+    assert "Mercado Pago" in result.message
+    assert "Carteira fisica" in result.message
+    assert transaction_repository.list() == []
+
+
+def test_multiple_entries_by_newline_are_recorded_separately() -> None:
+    service, _, transaction_repository = make_service()
+
+    result = service.handle_text(
+        "Gastei R$ 45 no mercado, categoria alimentacao\n"
+        "Paguei R$ 120 de internet, categoria moradia\n"
+        "Gastei R$ 80 com Uber, categoria transporte"
+    )
+    records = transaction_repository.list()
+
+    assert result.status == "batch_processed"
+    assert len(records) == 3
+    assert "Registrei 3 lancamentos" in result.message
+    assert all("internet, categoria moradia 80" not in record.description for record in records)
+
+
+def test_multiple_entries_by_pipe_and_semicolon_are_split() -> None:
+    pipe_items = split_financial_entries(
+        "Gastei R$ 45 no mercado | Paguei R$ 120 de internet | Recebi R$ 300 de freelance"
+    )
+    semicolon_items = split_financial_entries(
+        "Gastei R$ 45 no mercado; Paguei R$ 120 de internet; Recebi R$ 300 de freelance"
+    )
+
+    assert len(pipe_items) == 3
+    assert len(semicolon_items) == 3
+
+
+def test_invalid_message_returns_friendly_help() -> None:
+    service, _, _ = make_service()
+
+    result = service.handle_text("v")
+
+    assert result.status == "needs_more_info"
+    assert "Nao consegui entender" in result.message
+    assert "type" not in result.message
+    assert "amount" not in result.message

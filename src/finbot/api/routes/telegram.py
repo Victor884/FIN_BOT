@@ -4,10 +4,11 @@ from collections.abc import Iterator
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
 from finbot.core.settings import Settings
-from finbot.db.repositories import TransactionRepository
+from finbot.db.repositories import AccountRepository, TransactionRepository
 from finbot.db.session import create_database_schema, create_session_factory
 from finbot.parser.factory import build_financial_parser
 from finbot.sheets.client import GoogleSheetsClient
+from finbot.services.messages import BotMessageService
 from finbot.services.transactions import TransactionEntryService
 from finbot.telegram.client import TelegramClient
 from finbot.telegram.schemas import TelegramUpdate
@@ -28,8 +29,39 @@ def get_transaction_entry_service(
     with session_factory() as session:
         try:
             repository = TransactionRepository(session)
+            account_repository = AccountRepository(session)
             parser = build_financial_parser(settings)
-            yield TransactionEntryService(repository=repository, parser=parser)
+            yield TransactionEntryService(
+                repository=repository,
+                parser=parser,
+                account_repository=account_repository,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
+
+def get_bot_message_service(
+    settings: Settings = Depends(get_settings),
+) -> Iterator[BotMessageService]:
+    create_database_schema(settings)
+    session_factory = create_session_factory(settings)
+    with session_factory() as session:
+        try:
+            transaction_repository = TransactionRepository(session)
+            account_repository = AccountRepository(session)
+            parser = build_financial_parser(settings)
+            transaction_service = TransactionEntryService(
+                repository=transaction_repository,
+                parser=parser,
+                account_repository=account_repository,
+            )
+            yield BotMessageService(
+                transaction_service=transaction_service,
+                transaction_repository=transaction_repository,
+                account_repository=account_repository,
+            )
             session.commit()
         except Exception:
             session.rollback()
@@ -53,7 +85,7 @@ async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
-    service: TransactionEntryService = Depends(get_transaction_entry_service),
+    service: BotMessageService = Depends(get_bot_message_service),
     telegram_client: TelegramClient | None = Depends(get_telegram_client),
     sheets_client: GoogleSheetsClient | None = Depends(get_google_sheets_client),
 ) -> dict[str, object]:
@@ -70,16 +102,17 @@ async def telegram_webhook(
     if update.message is None or not update.message.text:
         return {"status": "ignored", "update_id": update.update_id, "reason": "message_text_missing"}
 
-    result = service.record_from_text(update.message.text)
+    result = service.handle_text(update.message.text)
     sheet_synced = False
     telegram_replied = False
 
-    if result.is_recorded and result.record is not None and sheets_client is not None:
+    if result.records and sheets_client is not None:
         try:
-            sheets_client.append_transaction(result.record)
+            for record in result.records:
+                sheets_client.append_transaction(record)
             sheet_synced = True
         except Exception:
-            logger.exception("google_sheets_sync_failed transaction_id=%s", result.transaction_id)
+            logger.exception("google_sheets_sync_failed records=%s", len(result.records))
 
     if telegram_client is not None:
         try:
@@ -89,13 +122,24 @@ async def telegram_webhook(
             logger.exception("telegram_send_message_failed chat_id=%s", update.message.chat.id)
 
     return {
-        "status": result.status.value,
+        "status": result.status,
         "update_id": update.update_id,
         "message": result.message,
-        "transaction_id": result.transaction_id,
+        "transaction_ids": [record.id for record in result.records],
         "sheet_synced": sheet_synced,
         "telegram_replied": telegram_replied,
-        "missing_fields": list(result.missing_fields),
-        "errors": list(result.validation.errors) if result.validation else [],
-        "warnings": list(result.validation.warnings) if result.validation else [],
+        "entry_statuses": [entry.status.value for entry in result.entry_results],
+        "missing_fields": [
+            list(entry.missing_fields) for entry in result.entry_results if entry.missing_fields
+        ],
+        "errors": [
+            list(entry.validation.errors)
+            for entry in result.entry_results
+            if entry.validation and entry.validation.errors
+        ],
+        "warnings": [
+            list(entry.validation.warnings)
+            for entry in result.entry_results
+            if entry.validation and entry.validation.warnings
+        ],
     }

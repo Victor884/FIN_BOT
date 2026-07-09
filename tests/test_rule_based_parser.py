@@ -27,7 +27,7 @@ def test_parse_income_with_received_status() -> None:
     assert result.draft is not None
     assert result.draft.type == TransactionType.INCOME
     assert result.draft.amount == Decimal("2500")
-    assert result.draft.category == "salario"
+    assert result.draft.category == "receita_fixa"
     assert result.draft.status == TransactionStatus.RECEIVED
 
 
@@ -50,6 +50,53 @@ def test_parse_transfer_between_accounts() -> None:
     assert result.draft.amount == Decimal("500")
     assert result.draft.account_from == "conta corrente"
     assert result.draft.account_to == "poupanca"
+
+
+def test_parse_transfer_between_named_accounts() -> None:
+    result = make_parser().parse("Transferi R$ 60 do banco Inter para a carteira do Mercado Pago")
+
+    assert result.draft is not None
+    assert result.draft.type == TransactionType.TRANSFER
+    assert result.draft.amount == Decimal("60")
+    assert result.draft.account_from == "banco inter"
+    assert result.draft.account_to == "carteira do mercado pago"
+
+
+def test_parse_transfer_with_only_destination() -> None:
+    result = make_parser().parse("Mandei R$ 400 para a poupanca hoje")
+
+    assert result.draft is not None
+    assert result.draft.type == TransactionType.TRANSFER
+    assert result.draft.amount == Decimal("400")
+    assert result.draft.account_from is None
+    assert result.draft.account_to == "poupanca"
+
+
+def test_parse_absolute_day_and_description() -> None:
+    result = make_parser().parse("Paguei R$ 120 de internet dia 05/07")
+
+    assert result.draft is not None
+    assert result.draft.type == TransactionType.EXPENSE
+    assert result.draft.amount == Decimal("120")
+    assert result.draft.description == "internet"
+    assert result.draft.transaction_date == date(2026, 7, 5)
+
+
+def test_parse_restaurant_on_saturday() -> None:
+    result = make_parser().parse("Gastei R$ 80 com restaurante no sabado")
+
+    assert result.draft is not None
+    assert result.draft.type == TransactionType.EXPENSE
+    assert result.draft.category == "alimentacao"
+
+
+def test_parse_lunch_decimal_expense() -> None:
+    result = make_parser().parse("comprei um almoco R$ 32,99")
+
+    assert result.draft is not None
+    assert result.draft.type == TransactionType.EXPENSE
+    assert result.draft.amount == Decimal("32.99")
+    assert result.draft.category == "alimentacao"
 
 
 def test_parse_yesterday() -> None:
