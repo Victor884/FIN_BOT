@@ -127,6 +127,14 @@ python -m ruff check .
 
 O guia completo de credenciais, configuracao local, webhook do Telegram, Google Sheets e deploy esta em `docs/deploy.md`.
 
+## CI
+
+O GitHub Actions roda automaticamente em push para `main` e em pull requests:
+
+- `python -m pytest`
+- `python -m ruff check .`
+- `python -m compileall src tests`
+
 ## Politica De Seguranca
 
 - Nunca commitar `.env`, tokens, chaves ou credenciais.
