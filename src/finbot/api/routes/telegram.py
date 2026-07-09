@@ -1,13 +1,14 @@
 import logging
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 
 from finbot.core.settings import Settings
 from finbot.db.repositories import AccountRepository, CardRepository, TransactionRepository
 from finbot.db.session import create_database_schema, create_session_factory
 from finbot.parser.factory import build_financial_parser
 from finbot.sheets.client import GoogleSheetsClient
+from finbot.sheets.rows import transaction_to_sheet_row
 from finbot.services.messages import BotMessageService
 from finbot.services.transactions import TransactionEntryService
 from finbot.telegram.client import TelegramClient
@@ -88,6 +89,7 @@ def get_google_sheets_client(settings: Settings = Depends(get_settings)) -> Goog
 @router.post("/webhook", status_code=status.HTTP_202_ACCEPTED)
 async def telegram_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
     settings: Settings = Depends(get_settings),
     service: BotMessageService = Depends(get_bot_message_service),
@@ -113,23 +115,22 @@ async def telegram_webhook(
 
     if result.status == "export":
         if sheets_client is not None:
-            try:
-                sheets_client.setup_workbook()
-                result = type(result)(
-                    status=result.status,
-                    message="Google Sheets atualizado com abas, cabecalhos e formulas.",
-                    records=result.records,
-                    entry_results=result.entry_results,
-                )
-                sheet_synced = True
-            except Exception:
-                logger.exception("google_sheets_export_failed")
-                result = type(result)(
-                    status=result.status,
-                    message="Nao consegui atualizar o Google Sheets agora. Verifique as credenciais.",
-                    records=result.records,
-                    entry_results=result.entry_results,
-                )
+            result = type(result)(
+                status=result.status,
+                message=(
+                    "Vou atualizar o Google Sheets em segundo plano. "
+                    "Te aviso aqui quando terminar."
+                ),
+                records=result.records,
+                entry_results=result.entry_results,
+            )
+            sheet_synced = True
+            background_tasks.add_task(
+                _setup_sheets_and_notify,
+                sheets_client,
+                telegram_client,
+                update.message.chat.id,
+            )
         else:
             result = type(result)(
                 status=result.status,
@@ -138,20 +139,17 @@ async def telegram_webhook(
                 entry_results=result.entry_results,
             )
 
-    if result.records and sheets_client is not None:
-        try:
-            for record in result.records:
-                sheets_client.append_transaction(record)
-            sheet_synced = True
-        except Exception:
-            logger.exception("google_sheets_sync_failed records=%s", len(result.records))
-
     if telegram_client is not None:
         try:
             telegram_client.send_message(chat_id=update.message.chat.id, text=result.message)
             telegram_replied = True
         except Exception:
             logger.exception("telegram_send_message_failed chat_id=%s", update.message.chat.id)
+
+    if result.records and sheets_client is not None:
+        rows = [transaction_to_sheet_row(record) for record in result.records]
+        background_tasks.add_task(_sync_transaction_rows_to_sheets, sheets_client, rows)
+        sheet_synced = True
 
     return {
         "status": result.status,
@@ -175,3 +173,43 @@ async def telegram_webhook(
             if entry.validation and entry.validation.warnings
         ],
     }
+
+
+def _sync_transaction_rows_to_sheets(
+    sheets_client: GoogleSheetsClient,
+    rows: list[list[object]],
+) -> None:
+    try:
+        for row in rows:
+            sheets_client.append_transaction_row(row)
+    except Exception:
+        logger.exception("google_sheets_sync_failed rows=%s", len(rows))
+
+
+def _setup_sheets_and_notify(
+    sheets_client: GoogleSheetsClient,
+    telegram_client: TelegramClient | None,
+    chat_id: int | str,
+) -> None:
+    try:
+        sheets_client.setup_workbook()
+    except Exception:
+        logger.exception("google_sheets_export_failed")
+        if telegram_client is not None:
+            try:
+                telegram_client.send_message(
+                    chat_id=chat_id,
+                    text="Nao consegui atualizar o Google Sheets agora. Verifique as credenciais.",
+                )
+            except Exception:
+                logger.exception("telegram_export_failure_notification_failed chat_id=%s", chat_id)
+        return
+
+    if telegram_client is not None:
+        try:
+            telegram_client.send_message(
+                chat_id=chat_id,
+                text="Google Sheets atualizado com abas, cabecalhos e formulas.",
+            )
+        except Exception:
+            logger.exception("telegram_export_success_notification_failed chat_id=%s", chat_id)

@@ -75,6 +75,9 @@ class GoogleSheetsClient:
 
     def append_transaction(self, transaction: TransactionRecord) -> dict[str, object]:
         row = transaction_to_sheet_row(transaction)
+        return self.append_transaction_row(row)
+
+    def append_transaction_row(self, row: Sequence[object]) -> dict[str, object]:
         request = (
             self._service.spreadsheets()
             .values()
@@ -83,7 +86,7 @@ class GoogleSheetsClient:
                 range=self._transactions_range,
                 valueInputOption="USER_ENTERED",
                 insertDataOption="INSERT_ROWS",
-                body={"values": [row]},
+                body={"values": [list(row)]},
             )
         )
         response = request.execute()

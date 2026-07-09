@@ -28,10 +28,15 @@ class FakeTelegramClient:
 class FakeSheetsClient:
     def __init__(self) -> None:
         self.appended_ids: list[str] = []
+        self.appended_rows: list[list[object]] = []
         self.setup_calls = 0
 
     def append_transaction(self, transaction) -> dict[str, object]:  # type: ignore[no-untyped-def]
         self.appended_ids.append(transaction.id)
+        return {"updates": {"updatedRows": 1}}
+
+    def append_transaction_row(self, row: list[object]) -> dict[str, object]:
+        self.appended_rows.append(row)
         return {"updates": {"updatedRows": 1}}
 
     def setup_workbook(self) -> list[dict[str, object]]:
@@ -117,7 +122,7 @@ def test_telegram_webhook_records_valid_update() -> None:
     assert body["sheet_synced"] is True
     assert body["telegram_replied"] is True
     assert body["errors"] == []
-    assert fake_sheets.appended_ids == [body["transaction_ids"][0]]
+    assert fake_sheets.appended_rows[0][0] == body["transaction_ids"][0]
     assert fake_telegram.messages == [
         (456, "Lancamento registrado: Despesa de R$ 45,00 - mercado - Categoria: alimentacao.")
     ]
@@ -175,7 +180,11 @@ def test_telegram_webhook_export_updates_google_sheets() -> None:
     assert response.json()["sheet_synced"] is True
     assert fake_sheets.setup_calls == 1
     assert fake_telegram.messages == [
-        (456, "Google Sheets atualizado com abas, cabecalhos e formulas.")
+        (
+            456,
+            "Vou atualizar o Google Sheets em segundo plano. Te aviso aqui quando terminar.",
+        ),
+        (456, "Google Sheets atualizado com abas, cabecalhos e formulas."),
     ]
 
 
