@@ -22,10 +22,14 @@ def get_transaction_entry_service(
     create_database_schema(settings)
     session_factory = create_session_factory(settings)
     with session_factory() as session:
-        repository = TransactionRepository(session)
-        parser = build_financial_parser(settings)
-        yield TransactionEntryService(repository=repository, parser=parser)
-        session.commit()
+        try:
+            repository = TransactionRepository(session)
+            parser = build_financial_parser(settings)
+            yield TransactionEntryService(repository=repository, parser=parser)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
 
 
 @router.post("/webhook", status_code=status.HTTP_202_ACCEPTED)
