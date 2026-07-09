@@ -251,3 +251,48 @@ def test_invalid_message_returns_friendly_help() -> None:
     assert "Nao consegui entender" in result.message
     assert "type" not in result.message
     assert "amount" not in result.message
+
+
+def test_recent_transactions_command() -> None:
+    service, _, _, _ = make_service()
+    service.handle_text("Gastei R$ 45 no mercado hoje")
+
+    result = service.handle_text("/ultimos 10")
+
+    assert result.status == "recent"
+    assert "Ultimos 1 lancamentos:" in result.message
+    assert "mercado" in result.message
+
+
+def test_pending_transactions_command() -> None:
+    service, _, _, _ = make_service()
+    service.handle_text("Vou pagar R$ 120 de internet")
+
+    result = service.handle_text("/pendentes")
+
+    assert result.status == "pending"
+    assert "Despesas pendentes:" in result.message
+    assert "internet" in result.message
+
+
+def test_summary_and_export_commands() -> None:
+    service, _, _, _ = make_service()
+    service.handle_text("Gastei R$ 45 no mercado hoje")
+    service.handle_text("Recebi R$ 100 de freelance")
+
+    summary = service.handle_text("/resumo")
+    export = service.handle_text("/exportar")
+
+    assert summary.status == "summary"
+    assert "Resumo do mes:" in summary.message
+    assert "Receitas:" in summary.message
+    assert export.status == "export"
+    assert "Google Sheets" in export.message
+
+
+def test_cancel_edit_delete_commands_are_friendly() -> None:
+    service, _, _, _ = make_service()
+
+    assert service.handle_text("/cancelar").message == "Operacao pendente cancelada."
+    assert "ainda nao esta habilitada" in service.handle_text("/editar").message
+    assert "ainda nao esta habilitada" in service.handle_text("/excluir").message

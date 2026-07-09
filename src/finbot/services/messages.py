@@ -97,6 +97,26 @@ class BotMessageService:
             return BotMessageResult(status="general_report", message=self._general_report())
         if command == "/categorias":
             return BotMessageResult(status="categories", message=categories_message())
+        if command == "/ultimos":
+            return BotMessageResult(status="recent", message=self._recent_transactions(args))
+        if command == "/resumo":
+            return BotMessageResult(status="summary", message=self._quick_month_summary())
+        if command == "/pendentes":
+            return BotMessageResult(status="pending", message=self._pending_transactions())
+        if command == "/exportar":
+            return BotMessageResult(status="export", message=export_message())
+        if command == "/cancelar":
+            return BotMessageResult(status="cancelled", message="Operacao pendente cancelada.")
+        if command == "/editar":
+            return BotMessageResult(
+                status="edit_not_available",
+                message="Edicao interativa ainda nao esta habilitada. Use /ultimos para localizar o lancamento.",
+            )
+        if command == "/excluir":
+            return BotMessageResult(
+                status="delete_not_available",
+                message="Exclusao interativa ainda nao esta habilitada. Use /ultimos para localizar o lancamento.",
+            )
         if command in {"/ajuda", "/start"}:
             return BotMessageResult(status="help", message=help_message())
 
@@ -201,6 +221,47 @@ class BotMessageService:
         ]
         return "\n".join(lines)
 
+    def _recent_transactions(self, args: str) -> str:
+        limit = 5
+        if args.strip().isdigit():
+            limit = max(1, min(20, int(args.strip())))
+        records = self._transaction_repository.list(limit=limit)
+        lines = [f"Ultimos {len(records)} lancamentos:"]
+        lines.extend(format_recent_records(records))
+        return "\n".join(lines)
+
+    def _quick_month_summary(self) -> str:
+        today = date.today()
+        start = date(today.year, today.month, 1)
+        records = self._transaction_repository.list_between(start, today)
+        income = sum(
+            (record.amount for record in records if record.type == TransactionType.INCOME.value),
+            Decimal("0"),
+        )
+        expenses = sum(
+            (record.amount for record in records if record.type == TransactionType.EXPENSE.value),
+            Decimal("0"),
+        )
+        days_elapsed = max(1, (today - start).days + 1)
+        daily_average = expenses / Decimal(days_elapsed)
+        return "\n".join(
+            [
+                "Resumo do mes:",
+                f"Receitas: {format_money(income)}",
+                f"Despesas: {format_money(expenses)}",
+                f"Saldo: {format_money(income - expenses)}",
+                f"Media diaria de gastos: {format_money(daily_average)}",
+            ]
+        )
+
+    def _pending_transactions(self) -> str:
+        records = self._transaction_repository.list_pending()
+        if not records:
+            return "Nenhuma despesa pendente encontrada."
+        lines = ["Despesas pendentes:"]
+        lines.extend(format_recent_records(records))
+        return "\n".join(lines)
+
 
 def split_financial_entries(text: str) -> tuple[str, ...]:
     normalized = text.strip()
@@ -297,5 +358,16 @@ def help_message() -> str:
         "- /cartoes\n"
         "- /fatura Nubank\n"
         "- /relatorio Nubank\n"
-        "- /relatoriogeral"
+        "- /relatoriogeral\n"
+        "- /ultimos 10\n"
+        "- /resumo\n"
+        "- /pendentes\n"
+        "- /exportar"
+    )
+
+
+def export_message() -> str:
+    return (
+        "A sincronizacao com Google Sheets acontece automaticamente a cada novo lancamento. "
+        "Para recriar abas e formulas, execute o setup da planilha no backend."
     )
