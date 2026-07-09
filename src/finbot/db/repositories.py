@@ -1,3 +1,5 @@
+from datetime import date
+
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
@@ -29,5 +31,22 @@ class TransactionRepository:
             select(TransactionRecord)
             .order_by(TransactionRecord.transaction_date.desc(), TransactionRecord.created_at.desc())
             .limit(limit)
+        )
+        return list(self._session.scalars(statement))
+
+    def list_between(self, start_date: date, end_date: date) -> list[TransactionRecord]:
+        statement: Select[tuple[TransactionRecord]] = (
+            select(TransactionRecord)
+            .where(TransactionRecord.transaction_date >= start_date)
+            .where(TransactionRecord.transaction_date <= end_date)
+            .order_by(TransactionRecord.transaction_date.asc(), TransactionRecord.created_at.asc())
+        )
+        return list(self._session.scalars(statement))
+
+    def list_pending(self) -> list[TransactionRecord]:
+        statement: Select[tuple[TransactionRecord]] = (
+            select(TransactionRecord)
+            .where(TransactionRecord.status == "pending")
+            .order_by(TransactionRecord.transaction_date.asc(), TransactionRecord.created_at.asc())
         )
         return list(self._session.scalars(statement))
