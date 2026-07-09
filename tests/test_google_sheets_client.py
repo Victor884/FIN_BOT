@@ -18,29 +18,44 @@ class FakeAppendRequest:
         return self._response
 
 
+class FakeUpdateRequest(FakeAppendRequest):
+    pass
+
+
 class FakeValuesResource:
     def __init__(self) -> None:
         self.append_kwargs: dict[str, object] | None = None
+        self.update_calls: list[dict[str, object]] = []
 
     def append(self, **kwargs: object) -> FakeAppendRequest:
         self.append_kwargs = kwargs
         return FakeAppendRequest({"updates": {"updatedRows": 1}})
 
+    def update(self, **kwargs: object) -> FakeUpdateRequest:
+        self.update_calls.append(kwargs)
+        return FakeUpdateRequest({"updatedRows": 1})
+
 
 class FakeSpreadsheetsResource:
     def __init__(self, values_resource: FakeValuesResource) -> None:
         self._values_resource = values_resource
+        self.batch_update_kwargs: dict[str, object] | None = None
 
     def values(self) -> FakeValuesResource:
         return self._values_resource
+
+    def batchUpdate(self, **kwargs: object) -> FakeUpdateRequest:
+        self.batch_update_kwargs = kwargs
+        return FakeUpdateRequest({"replies": []})
 
 
 class FakeSheetsService:
     def __init__(self) -> None:
         self.values_resource = FakeValuesResource()
+        self.spreadsheets_resource = FakeSpreadsheetsResource(self.values_resource)
 
     def spreadsheets(self) -> FakeSpreadsheetsResource:
-        return FakeSpreadsheetsResource(self.values_resource)
+        return self.spreadsheets_resource
 
 
 def make_transaction() -> TransactionRecord:
@@ -102,6 +117,26 @@ def test_append_transaction_calls_google_values_append() -> None:
         "valueInputOption": "USER_ENTERED",
         "insertDataOption": "INSERT_ROWS",
         "body": {"values": [transaction_to_sheet_row(make_transaction())]},
+    }
+
+
+def test_setup_workbook_creates_sheets_and_headers() -> None:
+    fake_service = FakeSheetsService()
+    client = GoogleSheetsClient(service=fake_service, spreadsheet_id="sheet-id")
+
+    responses = client.setup_workbook()
+
+    assert responses[0] == {"replies": []}
+    assert fake_service.spreadsheets_resource.batch_update_kwargs is not None
+    batch_body = fake_service.spreadsheets_resource.batch_update_kwargs["body"]
+    assert isinstance(batch_body, dict)
+    assert len(batch_body["requests"]) == 7
+    assert len(fake_service.values_resource.update_calls) == 7
+    assert fake_service.values_resource.update_calls[0] == {
+        "spreadsheetId": "sheet-id",
+        "range": "Lancamentos!A1",
+        "valueInputOption": "USER_ENTERED",
+        "body": {"values": [list(TRANSACTION_HEADERS)]},
     }
 
 

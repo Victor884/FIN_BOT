@@ -7,6 +7,9 @@ from googleapiclient.discovery import build
 from finbot.core.errors import ConfigurationError
 from finbot.core.settings import Settings
 from finbot.db.models import TransactionRecord
+from finbot.sheets.layout import SheetDefinition
+from finbot.sheets.layout import build_create_missing_sheets_request
+from finbot.sheets.layout import default_sheet_definitions
 from finbot.sheets.rows import transaction_to_sheet_row
 
 
@@ -18,9 +21,15 @@ class SheetsValuesResource(Protocol):
     def append(self, **kwargs: object) -> object:
         pass
 
+    def update(self, **kwargs: object) -> object:
+        pass
+
 
 class SheetsSpreadsheetsResource(Protocol):
     def values(self) -> SheetsValuesResource:
+        pass
+
+    def batchUpdate(self, **kwargs: object) -> object:
         pass
 
 
@@ -72,3 +81,42 @@ class GoogleSheetsClient:
 
     def append_transactions(self, transactions: Sequence[TransactionRecord]) -> list[dict[str, object]]:
         return [self.append_transaction(transaction) for transaction in transactions]
+
+    def setup_workbook(
+        self,
+        sheet_definitions: Sequence[SheetDefinition] | None = None,
+    ) -> list[dict[str, object]]:
+        definitions = tuple(sheet_definitions or default_sheet_definitions())
+        responses = [self._batch_update(build_create_missing_sheets_request(definitions))]
+
+        for definition in definitions:
+            responses.append(
+                self.update_values(
+                    range_name=f"{definition.title}!A1",
+                    values=[list(definition.headers)],
+                )
+            )
+
+        return responses
+
+    def update_values(self, range_name: str, values: Sequence[Sequence[object]]) -> dict[str, object]:
+        request = (
+            self._service.spreadsheets()
+            .values()
+            .update(
+                spreadsheetId=self._spreadsheet_id,
+                range=range_name,
+                valueInputOption="USER_ENTERED",
+                body={"values": [list(row) for row in values]},
+            )
+        )
+        response = request.execute()
+        return dict(response)
+
+    def _batch_update(self, body: dict[str, object]) -> dict[str, object]:
+        request = self._service.spreadsheets().batchUpdate(
+            spreadsheetId=self._spreadsheet_id,
+            body=body,
+        )
+        response = request.execute()
+        return dict(response)
