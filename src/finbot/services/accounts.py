@@ -39,6 +39,14 @@ class AccountResolution:
     is_ambiguous: bool = False
 
 
+@dataclass(frozen=True)
+class AccountCreationParse:
+    name: str | None
+    account_type: AccountType | None
+    initial_balance: Decimal | None
+    missing_fields: tuple[str, ...] = ()
+
+
 class AccountResolver:
     def __init__(self, repository: AccountRepository) -> None:
         self._repository = repository
@@ -141,6 +149,34 @@ class AccountService:
         )
         return f"Conta cadastrada: {record.name} com saldo {format_money(record.current_balance)}."
 
+    def try_add_from_natural_text(self, text: str) -> str | None:
+        parsed = parse_natural_account_creation(text)
+        if parsed is None:
+            return None
+
+        if "name" in parsed.missing_fields:
+            return "Qual e o nome da conta que voce quer cadastrar?"
+        if "initial_balance" in parsed.missing_fields:
+            account_name = parsed.name or "essa conta"
+            return f"Qual e o saldo inicial da conta {account_name}?"
+
+        if parsed.name is None or parsed.initial_balance is None:
+            return "Nao consegui identificar todos os dados da conta. Envie nome e saldo inicial."
+
+        account_type = parsed.account_type or infer_account_type(parsed.name)
+        existing = self._repository.get_by_name(parsed.name)
+        if existing:
+            return f"A conta {existing.name} ja esta cadastrada com saldo {format_money(existing.current_balance)}."
+
+        record = self._repository.add(
+            AccountDraft(
+                name=parsed.name,
+                type=account_type,
+                initial_balance=parsed.initial_balance,
+            )
+        )
+        return f"Conta cadastrada: {record.name} com saldo {format_money(record.current_balance)}."
+
     def list_accounts(self) -> str:
         accounts = self._repository.list()
         if not accounts:
@@ -188,6 +224,117 @@ def display_account_name(text: str) -> str:
     if known:
         return known
     return " ".join(part.capitalize() for part in normalized.split())
+
+
+def parse_natural_account_creation(text: str) -> AccountCreationParse | None:
+    normalized = normalize_text(text)
+    if not _looks_like_account_creation(normalized):
+        return None
+
+    balance = _extract_money(normalized)
+    explicit_type = _extract_explicit_account_type(normalized)
+    name = _extract_account_name_from_creation(normalized)
+    if name:
+        canonical_name = AccountResolverStub.canonical_name_for(name) or display_account_name(name)
+    else:
+        canonical_name = None
+
+    missing_fields: list[str] = []
+    if not canonical_name:
+        missing_fields.append("name")
+    if balance is None:
+        missing_fields.append("initial_balance")
+
+    return AccountCreationParse(
+        name=canonical_name,
+        account_type=explicit_type or (infer_account_type(canonical_name) if canonical_name else None),
+        initial_balance=balance,
+        missing_fields=tuple(missing_fields),
+    )
+
+
+def _looks_like_account_creation(normalized_text: str) -> bool:
+    triggers = (
+        "crie uma conta",
+        "criar conta",
+        "adicionar conta",
+        "adicione minha conta",
+        "adicionar minha conta",
+        "cadastrar carteira",
+        "cadastrar conta",
+        "tenho",
+        "minha poupanca",
+    )
+    return any(trigger in normalized_text for trigger in triggers) and (
+        "conta" in normalized_text
+        or "carteira" in normalized_text
+        or "poupanca" in normalized_text
+        or "mercado pago" in normalized_text
+    )
+
+
+def _extract_account_name_from_creation(normalized_text: str) -> str | None:
+    patterns = (
+        r"conta chamada\s+(.+?)(?:\s+com\s+saldo|\s+saldo|$)",
+        r"conta\s+(.+?)(?:\s+com\s+r\$|\s+com\s+\d|\s+tipo\s+|\s+saldo|$)",
+        r"no\s+(.+?)(?:$|\s+com\s+saldo)",
+        r"carteira\s+(.+?)(?:\s+com\s+saldo|\s+saldo|$)",
+        r"minha\s+(.+?)\s+comeca\s+com",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, normalized_text)
+        if match:
+            name = _clean_account_name(match.group(1))
+            if name:
+                return name
+    if "minha poupanca" in normalized_text:
+        return "poupanca"
+    return None
+
+
+def _clean_account_name(value: str) -> str:
+    value = re.sub(r"\b(minha|meu|do|da|de|inicial|saldo|com|r\$)\b", " ", value)
+    value = re.sub(r"\b\d[\d.,]*\b", " ", value)
+    return normalize_text(value).strip(" ,-")
+
+
+def _extract_explicit_account_type(normalized_text: str) -> AccountType | None:
+    match = re.search(r"\btipo\s+(banco|carteira|cartao|poupanca|investimento|outro)\b", normalized_text)
+    if match:
+        return parse_account_type(match.group(1))
+    return None
+
+
+def _extract_money(normalized_text: str) -> Decimal | None:
+    match = re.search(r"(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:[,.]\d{1,2})?)", normalized_text)
+    if not match:
+        return None
+    return parse_decimal(match.group(1))
+
+
+def infer_account_type(name: str) -> AccountType:
+    normalized = normalize_text(name)
+    if "poupanca" in normalized:
+        return AccountType.SAVINGS
+    if "invest" in normalized:
+        return AccountType.INVESTMENT
+    if "carteira" in normalized or normalized in {"mercado pago"}:
+        return AccountType.WALLET
+    if "cartao" in normalized:
+        return AccountType.CARD
+    if "banco" in normalized or normalized in {"nubank", "banco inter", "itau", "bradesco", "santander"}:
+        return AccountType.BANK
+    return AccountType.OTHER
+
+
+class AccountResolverStub:
+    @staticmethod
+    def canonical_name_for(text: str) -> str | None:
+        normalized = normalize_text(text)
+        for canonical, aliases in ACCOUNT_ALIASES.items():
+            if normalized == canonical or any(alias in normalized for alias in aliases):
+                return ACCOUNT_DISPLAY_NAMES[canonical]
+        return None
 
 
 def parse_account_type(raw_type: str) -> AccountType:

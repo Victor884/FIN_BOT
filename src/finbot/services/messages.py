@@ -38,6 +38,10 @@ class BotMessageService:
         if stripped.startswith("/"):
             return self._handle_command(stripped)
 
+        account_message = self._account_service.try_add_from_natural_text(stripped)
+        if account_message is not None:
+            return BotMessageResult(status="account_added", message=account_message)
+
         items = split_financial_entries(stripped)
         logger.info("telegram_message_split count=%s is_multiple=%s", len(items), len(items) > 1)
         results = tuple(self._transaction_service.record_from_text(item) for item in items)

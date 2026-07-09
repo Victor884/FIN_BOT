@@ -45,6 +45,39 @@ def test_add_and_list_accounts() -> None:
     assert "Saldo total: R$ 1000,00" in list_message
 
 
+def test_add_account_from_natural_text_with_name_and_balance() -> None:
+    service, account_repository, _ = make_service()
+
+    message = service.handle_text("Crie uma conta chamada Banco Inter com saldo inicial de R$ 500").message
+    account = account_repository.get_by_name("Banco Inter")
+
+    assert message == "Conta cadastrada: Banco Inter com saldo R$ 500,00."
+    assert account is not None
+    assert account.type == "banco"
+    assert account.current_balance.to_eng_string() == "500.00"
+
+
+def test_add_wallet_from_natural_balance_sentence() -> None:
+    service, account_repository, _ = make_service()
+
+    message = service.handle_text("Tenho R$ 300 no Mercado Pago").message
+    account = account_repository.get_by_name("Mercado Pago")
+
+    assert message == "Conta cadastrada: Mercado Pago com saldo R$ 300,00."
+    assert account is not None
+    assert account.type == "carteira"
+
+
+def test_add_account_from_natural_text_asks_missing_balance() -> None:
+    service, account_repository, _ = make_service()
+
+    result = service.handle_text("Criar conta Nubank")
+
+    assert result.status == "account_added"
+    assert result.message == "Qual e o saldo inicial da conta Nubank?"
+    assert account_repository.list() == []
+
+
 def test_balance_general_and_by_account() -> None:
     service, _, _ = make_service()
     service.handle_text("/addconta Banco Inter banco saldo 1000")
