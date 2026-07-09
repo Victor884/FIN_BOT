@@ -28,10 +28,15 @@ class FakeTelegramClient:
 class FakeSheetsClient:
     def __init__(self) -> None:
         self.appended_ids: list[str] = []
+        self.setup_calls = 0
 
     def append_transaction(self, transaction) -> dict[str, object]:  # type: ignore[no-untyped-def]
         self.appended_ids.append(transaction.id)
         return {"updates": {"updatedRows": 1}}
+
+    def setup_workbook(self) -> list[dict[str, object]]:
+        self.setup_calls += 1
+        return [{"updatedRows": 1}]
 
 
 def make_service(session: Session) -> TransactionEntryService:
@@ -144,6 +149,33 @@ def test_telegram_webhook_returns_missing_fields() -> None:
     assert fake_sheets.appended_ids == []
     assert fake_telegram.messages == [
         (456, "Entendi a movimentacao, mas faltou o valor. Qual foi o valor?")
+    ]
+
+
+def test_telegram_webhook_export_updates_google_sheets() -> None:
+    fake_telegram = FakeTelegramClient()
+    fake_sheets = FakeSheetsClient()
+    client = make_client(telegram_client=fake_telegram, sheets_client=fake_sheets)
+
+    response = client.post(
+        "/telegram/webhook",
+        json={
+            "update_id": 123,
+            "message": {
+                "message_id": 10,
+                "date": 1783526400,
+                "chat": {"id": 456, "type": "private"},
+                "text": "/exportar",
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "export"
+    assert response.json()["sheet_synced"] is True
+    assert fake_sheets.setup_calls == 1
+    assert fake_telegram.messages == [
+        (456, "Google Sheets atualizado com abas, cabecalhos e formulas.")
     ]
 
 

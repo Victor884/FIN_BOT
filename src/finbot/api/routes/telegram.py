@@ -111,6 +111,33 @@ async def telegram_webhook(
     sheet_synced = False
     telegram_replied = False
 
+    if result.status == "export":
+        if sheets_client is not None:
+            try:
+                sheets_client.setup_workbook()
+                result = type(result)(
+                    status=result.status,
+                    message="Google Sheets atualizado com abas, cabecalhos e formulas.",
+                    records=result.records,
+                    entry_results=result.entry_results,
+                )
+                sheet_synced = True
+            except Exception:
+                logger.exception("google_sheets_export_failed")
+                result = type(result)(
+                    status=result.status,
+                    message="Nao consegui atualizar o Google Sheets agora. Verifique as credenciais.",
+                    records=result.records,
+                    entry_results=result.entry_results,
+                )
+        else:
+            result = type(result)(
+                status=result.status,
+                message="Google Sheets nao esta configurado neste ambiente.",
+                records=result.records,
+                entry_results=result.entry_results,
+            )
+
     if result.records and sheets_client is not None:
         try:
             for record in result.records:
