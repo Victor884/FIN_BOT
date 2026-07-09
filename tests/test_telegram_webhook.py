@@ -1,19 +1,45 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session, sessionmaker
 
 from finbot.api.app import create_app
 from finbot.api.routes import telegram
 from finbot.core.settings import Settings
+from finbot.db.base import Base
+from finbot.db.repositories import TransactionRepository
+from finbot.parser.rules import RuleBasedParser
+from finbot.services.transactions import TransactionEntryService
+
+
+def make_service(session: Session) -> TransactionEntryService:
+    parser = RuleBasedParser(today_provider=lambda: date(2026, 7, 9))
+    repository = TransactionRepository(session)
+    return TransactionEntryService(repository=repository, parser=parser)
 
 
 def make_client(webhook_secret: str | None = None) -> TestClient:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    session = session_factory()
+
     app = create_app(Settings(telegram_webhook_secret=webhook_secret))
     app.dependency_overrides[telegram.get_settings] = lambda: Settings(
         telegram_webhook_secret=webhook_secret
     )
+    app.dependency_overrides[telegram.get_transaction_entry_service] = lambda: make_service(session)
     return TestClient(app)
 
 
-def test_telegram_webhook_accepts_valid_update() -> None:
+def test_telegram_webhook_records_valid_update() -> None:
     client = make_client()
 
     response = client.post(
@@ -29,8 +55,53 @@ def test_telegram_webhook_accepts_valid_update() -> None:
         },
     )
 
+    body = response.json()
+
     assert response.status_code == 202
-    assert response.json() == {"status": "accepted", "update_id": 123}
+    assert body["status"] == "recorded"
+    assert body["update_id"] == 123
+    assert body["transaction_id"] is not None
+    assert body["errors"] == []
+
+
+def test_telegram_webhook_returns_missing_fields() -> None:
+    client = make_client()
+
+    response = client.post(
+        "/telegram/webhook",
+        json={
+            "update_id": 123,
+            "message": {
+                "message_id": 10,
+                "date": 1783526400,
+                "chat": {"id": 456, "type": "private"},
+                "text": "Gastei no mercado hoje",
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "needs_more_info"
+    assert response.json()["missing_fields"] == ["amount"]
+
+
+def test_telegram_webhook_ignores_update_without_text() -> None:
+    client = make_client()
+
+    response = client.post(
+        "/telegram/webhook",
+        json={
+            "update_id": 123,
+            "message": {
+                "message_id": 10,
+                "date": 1783526400,
+                "chat": {"id": 456, "type": "private"},
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "ignored"
 
 
 def test_telegram_webhook_rejects_invalid_secret() -> None:
