@@ -1,4 +1,8 @@
-from finbot.sheets.layout import build_create_missing_sheets_request, default_sheet_definitions
+from finbot.sheets.layout import (
+    build_create_missing_sheets_request,
+    default_formula_updates,
+    default_sheet_definitions,
+)
 from finbot.sheets.rows import TRANSACTION_HEADERS
 
 
@@ -7,12 +11,17 @@ def test_default_sheet_definitions_include_expected_tabs() -> None:
 
     assert [definition.title for definition in definitions] == [
         "Lancamentos",
-        "Categorias",
         "Contas",
+        "Cartoes",
+        "Categorias",
         "Resumo_Mensal",
-        "Categorias_Mes",
+        "Resumo_Conta",
+        "Resumo_Categoria",
+        "Faturas",
         "Pendentes",
         "Dashboard",
+        "Configuracoes",
+        "Logs",
     ]
     assert definitions[0].headers == TRANSACTION_HEADERS
 
@@ -31,3 +40,15 @@ def test_build_create_missing_sheets_request() -> None:
         }
     }
     assert len(request["requests"]) == len(definitions)
+
+
+def test_default_formula_updates_include_dashboard_and_summaries() -> None:
+    formulas = default_formula_updates()
+
+    ranges = [range_name for range_name, _ in formulas]
+
+    assert "Resumo_Mensal!A2" in ranges
+    assert "Resumo_Categoria!A2" in ranges
+    assert "Dashboard!A2" in ranges
+    assert any("SUMIFS" in str(values) for _, values in formulas)
+    assert any("QUERY" in str(values) for _, values in formulas)

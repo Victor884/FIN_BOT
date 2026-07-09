@@ -70,6 +70,7 @@ def make_transaction() -> TransactionRecord:
         payment_method="pix",
         account_from="conta corrente",
         account_to=None,
+        card_name="",
         is_recurring=False,
         status="paid",
         confidence=Decimal("0.850"),
@@ -91,16 +92,19 @@ def test_transaction_to_sheet_row_formats_values() -> None:
         "transaction-id",
         "2026-07-09",
         "expense",
-        "45.90",
+        "mercado",
         "alimentacao",
-        "pix",
+        "45.90",
         "conta corrente",
         "",
-        "mercado",
-        "nao",
+        "conta corrente",
+        "",
+        "pix",
         "paid",
-        "0.85",
-        "dedupe-key",
+        "2026-07",
+        2026,
+        "",
+        "2026-07-09T12:00:00+00:00",
         "2026-07-09T12:00:00+00:00",
     ]
 
@@ -131,14 +135,15 @@ def test_setup_workbook_creates_sheets_and_headers() -> None:
     assert fake_service.spreadsheets_resource.batch_update_kwargs is not None
     batch_body = fake_service.spreadsheets_resource.batch_update_kwargs["body"]
     assert isinstance(batch_body, dict)
-    assert len(batch_body["requests"]) == 7
-    assert len(fake_service.values_resource.update_calls) == 7
+    assert len(batch_body["requests"]) == 12
+    assert len(fake_service.values_resource.update_calls) > 12
     assert fake_service.values_resource.update_calls[0] == {
         "spreadsheetId": "sheet-id",
         "range": "Lancamentos!A1",
         "valueInputOption": "USER_ENTERED",
         "body": {"values": [list(TRANSACTION_HEADERS)]},
     }
+    assert any(call["range"] == "Dashboard!A2" for call in fake_service.values_resource.update_calls)
 
 
 def test_update_financial_dashboard_updates_expected_ranges() -> None:
@@ -163,7 +168,7 @@ def test_update_financial_dashboard_updates_expected_ranges() -> None:
         "Dashboard!A2",
         "Dashboard!A8",
         "Resumo_Mensal!A2",
-        "Categorias_Mes!A2",
+        "Resumo_Categoria!A2",
         "Pendentes!A2",
     ]
 

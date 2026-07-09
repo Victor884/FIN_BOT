@@ -15,12 +15,13 @@ from finbot.sheets.dashboard import pending_rows
 from finbot.sheets.layout import SheetDefinition
 from finbot.sheets.layout import build_create_missing_sheets_request
 from finbot.sheets.layout import default_sheet_definitions
+from finbot.sheets.layout import default_formula_updates
 from finbot.sheets.rows import transaction_to_sheet_row
 from finbot.services.queries import FinancialSummary
 
 
 SHEETS_SCOPES = ("https://www.googleapis.com/auth/spreadsheets",)
-DEFAULT_TRANSACTIONS_RANGE = "Lancamentos!A:N"
+DEFAULT_TRANSACTIONS_RANGE = "Lancamentos!A:Q"
 
 
 class SheetsValuesResource(Protocol):
@@ -103,6 +104,9 @@ class GoogleSheetsClient:
                 )
             )
 
+        for range_name, values in default_formula_updates():
+            responses.append(self.update_values(range_name=range_name, values=values))
+
         return responses
 
     def update_values(self, range_name: str, values: Sequence[Sequence[object]]) -> dict[str, object]:
@@ -128,7 +132,7 @@ class GoogleSheetsClient:
             self.update_values("Dashboard!A2", dashboard_rows_from_summary(summary)),
             self.update_values("Dashboard!A8", largest_expense_rows(summary)),
             self.update_values("Resumo_Mensal!A2", [monthly_summary_row(summary)]),
-            self.update_values("Categorias_Mes!A2", category_month_rows(summary)),
+            self.update_values("Resumo_Categoria!A2", category_month_rows(summary)),
             self.update_values("Pendentes!A2", pending_rows(list(pending_transactions))),
         ]
 
