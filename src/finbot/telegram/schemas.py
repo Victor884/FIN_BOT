@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TelegramChat(BaseModel):
@@ -23,7 +23,7 @@ class TelegramMessage(BaseModel):
     message_id: int
     date: int
     chat: TelegramChat
-    from_user: TelegramUser | None = None
+    from_user: TelegramUser | None = Field(default=None, alias="from")
     text: str | None = None
 
 
@@ -32,4 +32,3 @@ class TelegramUpdate(BaseModel):
 
     update_id: int
     message: TelegramMessage | None = None
-

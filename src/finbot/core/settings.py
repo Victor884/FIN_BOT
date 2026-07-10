@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     app_env: str = "local"
     app_name: str = "finbot"
     app_debug: bool = False
+    app_version: str = "0.2.0"
     database_url: str = "sqlite:///./data/finbot.sqlite3"
     telegram_bot_token: str | None = None
     telegram_webhook_secret: str | None = None
@@ -18,3 +19,22 @@ class Settings(BaseSettings):
     google_sheets_spreadsheet_id: str | None = None
     google_service_account_file: str | None = None
     log_level: str = "INFO"
+    cors_allowed_origins: str = "http://localhost:5173"
+    cors_allowed_methods: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    cors_allowed_headers: str = "Authorization,Content-Type,X-Request-ID"
+    cors_allow_credentials: bool = True
+    http_connect_timeout_seconds: float = 3.0
+    http_read_timeout_seconds: float = 8.0
+    jwt_secret: str = "change-me-in-production"
+    jwt_access_minutes: int = 15
+    jwt_refresh_days: int = 30
+    auth_allow_registration: bool = False
+    admin_email: str | None = None
+    admin_password: str | None = None
+    public_api_url: str | None = None
+    metrics_retention_days: int = 90
+
+
+    def csv_values(self, field_name: str) -> list[str]:
+        value = getattr(self, field_name)
+        return [item.strip() for item in value.split(",") if item.strip()]

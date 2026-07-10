@@ -1,5 +1,6 @@
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from time import perf_counter
 
 from finbot.db.models import TransactionRecord
 from finbot.db.repositories import AccountRepository, CardRepository, TransactionRepository
@@ -28,6 +29,11 @@ class TransactionEntryResult:
     draft: TransactionDraft | None = None
     missing_fields: tuple[str, ...] = ()
     validation: ValidationResult | None = None
+    parser_duration_ms: int = 0
+    validation_duration_ms: int = 0
+    database_duration_ms: int = 0
+    ai_duration_ms: int = 0
+    parser_source: str = "rules"
 
     @property
     def is_recorded(self) -> bool:
@@ -51,12 +57,20 @@ class TransactionEntryService:
         )
 
     def record_from_text(self, text: str) -> TransactionEntryResult:
+        parser_start = perf_counter()
         parse_result = self._parser.parse(text)
+        parser_duration_ms = round((perf_counter() - parser_start) * 1000)
+        timing = {
+            "parser_duration_ms": parser_duration_ms,
+            "ai_duration_ms": parse_result.ai_duration_ms,
+            "parser_source": parse_result.source,
+        }
         if parse_result.draft is None:
             return TransactionEntryResult(
                 status=TransactionEntryStatus.NEEDS_MORE_INFO,
                 message=_build_missing_fields_message(parse_result.missing_fields),
                 missing_fields=parse_result.missing_fields,
+                **timing,
             )
 
         draft = self._resolve_accounts(parse_result.draft)
@@ -67,19 +81,27 @@ class TransactionEntryService:
                 status=TransactionEntryStatus.NEEDS_MORE_INFO,
                 message=missing_transfer_message,
                 draft=draft,
+                **timing,
             )
 
+        validation_start = perf_counter()
         validation = validate_transaction(draft)
+        validation_duration_ms = round((perf_counter() - validation_start) * 1000)
+        timing["validation_duration_ms"] = validation_duration_ms
         if not validation.is_valid:
             return TransactionEntryResult(
                 status=TransactionEntryStatus.INVALID,
                 message=_build_validation_error_message(validation.errors, draft),
                 draft=draft,
                 validation=validation,
+                **timing,
             )
 
+        database_start = perf_counter()
         dedupe_key = build_transaction_dedupe_key(draft)
         existing_record = self._repository.get_by_dedupe_key(dedupe_key)
+        database_duration_ms = round((perf_counter() - database_start) * 1000)
+        timing["database_duration_ms"] = database_duration_ms
         if existing_record is not None:
             return TransactionEntryResult(
                 status=TransactionEntryStatus.DUPLICATE,
@@ -88,10 +110,13 @@ class TransactionEntryService:
                 record=existing_record,
                 draft=draft,
                 validation=validation,
+                **timing,
             )
 
+        database_start = perf_counter()
         record = self._repository.add(draft, dedupe_key=dedupe_key)
         self._apply_account_balance_changes(record)
+        timing["database_duration_ms"] += round((perf_counter() - database_start) * 1000)
         return TransactionEntryResult(
             status=TransactionEntryStatus.RECORDED,
             message=_build_success_message(record),
@@ -99,6 +124,7 @@ class TransactionEntryService:
             record=record,
             draft=draft,
             validation=validation,
+            **timing,
         )
 
     def _resolve_accounts(self, draft: TransactionDraft) -> TransactionDraft:

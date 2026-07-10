@@ -22,11 +22,15 @@ class OpenAIFinancialParser:
         model: str,
         base_url: str = "https://api.openai.com/v1",
         client: httpx.Client | None = None,
+        timeout: httpx.Timeout | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
-        self._client = client or httpx.Client(timeout=20)
+        self._client = client or httpx.Client(
+            timeout=timeout or httpx.Timeout(8.0, connect=3.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "OpenAIFinancialParser":
@@ -36,13 +40,17 @@ class OpenAIFinancialParser:
             api_key=settings.openai_api_key,
             model=settings.openai_model,
             base_url=settings.openai_base_url,
+            timeout=httpx.Timeout(
+                settings.http_read_timeout_seconds,
+                connect=settings.http_connect_timeout_seconds,
+            ),
         )
 
     def parse(self, text: str) -> ParseResult:
         payload = {
             "model": self._model,
             "input": _build_prompt(text),
-            "max_output_tokens": 500,
+            "max_output_tokens": 300,
         }
         response = self._client.post(
             f"{self._base_url}/responses",
@@ -75,7 +83,7 @@ def _build_prompt(text: str) -> str:
         "payment_method string|null, account_from string|null, account_to string|null, "
         "is_recurring boolean, status paid|pending|received, confidence number, "
         "needs_confirmation boolean, missing_fields array. "
-        f"Mensagem: {text}"
+        f"Mensagem: {text[:1000]}"
     )
 
 

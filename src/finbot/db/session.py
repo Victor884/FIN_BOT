@@ -1,31 +1,54 @@
-from sqlalchemy import create_engine, inspect, text
+from functools import lru_cache
+
+from pathlib import Path
+
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import sessionmaker
 
 from finbot.core.settings import Settings
 from finbot.db.base import Base
 
 
+@lru_cache(maxsize=8)
+def get_engine(database_url: str) -> Engine:
+    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+    return create_engine(
+        database_url,
+        future=True,
+        pool_pre_ping=True,
+        connect_args=connect_args,
+    )
+
+
+@lru_cache(maxsize=8)
+def _session_factory(database_url: str) -> sessionmaker:
+    return sessionmaker(
+        bind=get_engine(database_url),
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+        future=True,
+    )
+
+
 def create_session_factory(settings: Settings) -> sessionmaker:
-    engine = create_engine(settings.database_url, future=True)
-    return sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    return _session_factory(settings.database_url)
 
 
 def create_database_schema(settings: Settings) -> None:
-    engine = create_engine(settings.database_url, future=True)
+    engine = get_engine(settings.database_url)
+    _run_migrations(engine)
     Base.metadata.create_all(bind=engine)
-    _ensure_sqlite_columns(engine)
 
 
-def _ensure_sqlite_columns(engine) -> None:  # type: ignore[no-untyped-def]
-    if engine.dialect.name != "sqlite":
+def _run_migrations(engine: Engine) -> None:
+    config_path = Path("alembic.ini")
+    if not config_path.exists():
         return
+    from alembic import command
+    from alembic.config import Config
 
-    inspector = inspect(engine)
-    table_names = set(inspector.get_table_names())
-    if "transactions" not in table_names:
-        return
-
-    transaction_columns = {column["name"] for column in inspector.get_columns("transactions")}
+    config = Config(str(config_path))
     with engine.begin() as connection:
-        if "card_name" not in transaction_columns:
-            connection.execute(text("ALTER TABLE transactions ADD COLUMN card_name VARCHAR(120)"))
+        config.attributes["connection"] = connection
+        command.upgrade(config, "head")

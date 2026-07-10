@@ -10,6 +10,7 @@ from finbot.models.transaction import TransactionType
 from finbot.services.accounts import AccountService, format_money
 from finbot.services.cards import CardService
 from finbot.services.transactions import TransactionEntryResult, TransactionEntryService
+from finbot.services.web_link import WebLinkService
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,20 @@ class BotMessageService:
         self._transaction_service = transaction_service
         self._transaction_repository = transaction_repository
         self._account_repository = account_repository
+        self._card_repository = card_repository
         self._account_service = AccountService(account_repository)
         self._card_service = CardService(card_repository, account_repository) if card_repository else None
+
+    def bind_user(self, user_id: str) -> None:
+        """Scope all repositories in this request to the authenticated Telegram user."""
+        self._transaction_repository.user_id = user_id
+        self._account_repository.user_id = user_id
+        if self._card_repository is not None:
+            self._card_repository.user_id = user_id
+
+    @property
+    def session(self):  # type: ignore[no-untyped-def]
+        return self._transaction_repository._session
 
     def handle_text(self, text: str) -> BotMessageResult:
         stripped = text.strip()
@@ -78,6 +91,21 @@ class BotMessageService:
         command, _, args = text.partition(" ")
         command = command.lower()
         args = args.strip()
+
+        if command == "/vincular":
+            if self._transaction_repository.user_id is None:
+                return BotMessageResult(
+                    status="link_unavailable",
+                    message="Nao consegui identificar sua conta do Telegram agora.",
+                )
+            code = WebLinkService(self.session).create_code(self._transaction_repository.user_id)
+            return BotMessageResult(
+                status="link_code",
+                message=(
+                    "Use este codigo no acesso web do FIN_BOT: "
+                    f"{code}\nEle expira em 10 minutos e so pode ser usado uma vez."
+                ),
+            )
 
         if command == "/contas":
             return BotMessageResult(status="accounts", message=self._account_service.list_accounts())
@@ -362,7 +390,8 @@ def help_message() -> str:
         "- /ultimos 10\n"
         "- /resumo\n"
         "- /pendentes\n"
-        "- /exportar"
+        "- /exportar\n"
+        "- /vincular (gera acesso para o dashboard web)"
     )
 
 

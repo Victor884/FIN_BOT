@@ -1,5 +1,6 @@
 import logging
 from dataclasses import replace
+from time import perf_counter
 
 from finbot.models.transaction import TransactionDraft, TransactionType
 from finbot.parser.contracts import FinancialParser, ParseResult
@@ -28,12 +29,18 @@ class CompositeFinancialParser:
             return primary_result
 
         try:
+            ai_start = perf_counter()
             fallback_result = self._fallback.parse(text)
         except Exception:
             logger.exception("ai_parser_failed")
             return primary_result
 
-        return merge_rule_and_ai_result(primary_result, fallback_result)
+        merged = merge_rule_and_ai_result(primary_result, fallback_result)
+        return replace(
+            merged,
+            source="ai",
+            ai_duration_ms=round((perf_counter() - ai_start) * 1000),
+        )
 
 
 def parse_with_rules(parser: FinancialParser, message: str) -> ParseResult:
@@ -98,6 +105,8 @@ def merge_rule_and_ai_result(rule_result: ParseResult, ai_result: ParseResult) -
         missing_fields=ai_result.missing_fields,
         needs_confirmation=ai_result.needs_confirmation,
         raw_text=rule_result.raw_text or ai_result.raw_text,
+        source="ai",
+        ai_duration_ms=ai_result.ai_duration_ms,
     )
 
 

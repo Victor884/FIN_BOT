@@ -10,6 +10,8 @@ class ParseResult:
     missing_fields: tuple[str, ...] = ()
     needs_confirmation: bool = False
     raw_text: str = ""
+    source: str = "rules"
+    ai_duration_ms: int = 0
 
 
 class FinancialParser(Protocol):
