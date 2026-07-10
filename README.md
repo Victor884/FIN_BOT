@@ -1,142 +1,129 @@
-# Finbot
+# FIN_BOT
 
-Bot financeiro pessoal para Telegram, com backend em FastAPI, interpretacao de mensagens em linguagem natural, persistencia em banco de dados e sincronizacao com Google Sheets.
+Assistente financeiro pessoal com Telegram, FastAPI, SQLAlchemy, Google Sheets opcional e uma API autenticada para dashboards externos como o Lovable.
 
-## Objetivo
+## Arquitetura
 
-Construir o projeto de forma incremental, com modulos pequenos, testes e commits objetivos.
+```text
+Telegram -> Webhook FastAPI -> Parser local -> IA opcional -> Validacao -> Banco
+                                                        \-> Sheets em background
 
-## Stack Inicial
+Lovable -> JWT -> API /api/v1 -> Servicos de dashboard -> Banco
+```
 
-- Python
-- FastAPI
-- Telegram Bot API
-- SQLite no MVP
-- Google Sheets API
-- OpenAI API opcional para mensagens ambiguas
+O parser local atende mensagens previsiveis. A IA so e acionada quando o resultado local esta incompleto, ambiguo ou abaixo do limite de confianca. O Google Sheets roda depois da resposta do Telegram.
 
 ## Modulos
 
-- `api`: aplicacao FastAPI e rotas HTTP
-- `telegram`: adaptador do Telegram
-- `parser`: interpretacao de mensagens financeiras
-- `validation`: validacao dos dados extraidos
-- `db`: persistencia e repositorios
-- `sheets`: sincronizacao com Google Sheets
-- `core`: configuracoes, logs e erros
-- `models`: modelos de dominio
-- `services`: casos de uso da aplicacao
+- `api`: rotas, dependencias, schemas, CORS e tratamento de erros.
+- `core`: configuracao, seguranca, logs e retencao de metricas.
+- `db`: modelos, repositorios, engine compartilhada e sessoes.
+- `parser`: regras locais e fallback opcional por IA.
+- `services`: casos de uso financeiros, autenticacao e dashboards.
+- `telegram`: contratos e cliente HTTP da Bot API.
+- `sheets`: sincronizacao e estrutura da planilha.
+- `migrations`: migracoes Alembic portaveis para SQLite e PostgreSQL.
 
-## Status Atual
+## Execucao Local
 
-- Estrutura inicial do projeto criada.
-- Webhook FastAPI para Telegram criado em `/telegram/webhook`.
-- Parser por regras criado para despesas, receitas e transferencias simples.
-- Validacao de movimentacoes financeiras criada.
-- Persistencia inicial com SQLAlchemy e SQLite criada.
-- Testes automatizados cobrindo estrutura, webhook, parser, validacao e repositorio.
-
-## Proximos Passos
-
-O projeto deve continuar em modulos pequenos, sempre com testes, revisao de credenciais, commit e push antes de avancar.
-
-1. Criar o servico de lancamento financeiro.
-   - Orquestrar parser, validacao e repositorio.
-   - Retornar resultado estruturado para sucesso, erro e pendencias de confirmacao.
-   - Commit sugerido: `feat: adiciona serviço de lançamento financeiro`.
-
-2. Conectar o webhook do Telegram ao servico.
-   - Ler mensagens recebidas.
-   - Registrar movimentacoes validas.
-   - Retornar respostas amigaveis para o usuario.
-   - Commit sugerido: `feat: conecta telegram ao serviço financeiro`.
-
-3. Adicionar prevencao de duplicidade.
-   - Criar hash da mensagem e dados principais.
-   - Evitar registros repetidos em janela curta de tempo.
-   - Commit sugerido: `feat: evita lançamentos duplicados`.
-
-4. Criar consultas financeiras.
-   - Resumo do mes.
-   - Gastos por categoria.
-   - Saldo mensal.
-   - Despesas pendentes.
-   - Resumo semanal.
-   - Commit sugerido: `feat: adiciona consultas financeiras`.
-
-5. Criar integracao com Google Sheets.
-   - Cliente autenticado por Service Account.
-   - Append de lancamentos.
-   - Sincronizacao manual inicial.
-   - Commit sugerido: `feat: adiciona integração com google sheets`.
-
-6. Criar estrutura das abas da planilha.
-   - `Lancamentos`
-   - `Categorias`
-   - `Contas`
-   - `Resumo_Mensal`
-   - `Categorias_Mes`
-   - `Pendentes`
-   - `Dashboard`
-   - Commit sugerido: `feat: cria modelo de planilha financeira`.
-
-7. Adicionar dashboards e indicadores.
-   - Receitas, despesas e saldo mensal.
-   - Gastos por categoria.
-   - Maiores despesas.
-   - Fixos vs variaveis.
-   - Economia ou deficit.
-   - Commit sugerido: `feat: adiciona indicadores financeiros`.
-
-8. Adicionar IA opcional.
-   - Usar modelo barato apenas quando o parser por regras tiver baixa confianca.
-   - Retornar JSON estruturado.
-   - Manter `AI_ENABLED=false` como padrao.
-   - Commit sugerido: `feat: adiciona parser com IA opcional`.
-
-9. Melhorar logs e tratamento de erros.
-   - Padronizar logs por modulo.
-   - Capturar erros do Telegram, banco e Google Sheets.
-   - Evitar exposicao de dados sensiveis nos logs.
-   - Commit sugerido: `feat: melhora logs e tratamento de erros`.
-
-10. Preparar deploy.
-    - Adicionar comando de start.
-    - Documentar variaveis de ambiente.
-    - Configurar webhook publico.
-    - Commit sugerido: `docs: adiciona guia de deploy`.
-
-11. Adicionar CI.
-    - Rodar `pytest`, `ruff` e `compileall` no GitHub Actions.
-    - Commit sugerido: `ci: adiciona validações automatizadas`.
-
-## Desenvolvimento
-
-1. Copie `.env.example` para `.env`.
-2. Preencha os tokens apenas no `.env`.
-3. Instale as dependencias quando o modulo exigir.
-4. Rode as verificacoes antes de cada commit.
-
-```bash
-python -m compileall src tests
-python -m pytest
-python -m ruff check .
+```powershell
+python -m pip install -e ".[dev]"
+Copy-Item .env.example .env
+python -m alembic upgrade head
+python -m uvicorn finbot.api.app:app --reload
 ```
 
-## Deploy E Credenciais
+Verificacao:
 
-O guia completo de credenciais, configuracao local, webhook do Telegram, Google Sheets e deploy esta em `docs/deploy.md`.
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health/ready
+```
 
-## CI
+Documentacao interativa: `http://127.0.0.1:8000/docs`.
 
-O GitHub Actions roda automaticamente em push para `main` e em pull requests:
+## Endpoints
 
-- `python -m pytest`
-- `python -m ruff check .`
-- `python -m compileall src tests`
+Infraestrutura:
 
-## Politica De Seguranca
+- `GET /health`
+- `GET /health/live`
+- `GET /health/ready`
+- `GET /api/v1/config/public`
 
-- Nunca commitar `.env`, tokens, chaves ou credenciais.
-- Manter `.env.example` atualizado sem valores sensiveis.
-- Validar o diff antes de cada commit.
+Telegram:
+
+- `POST /telegram/webhook`
+
+Autenticacao web:
+
+- `POST /api/v1/auth/register` quando habilitado
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/telegram-link`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+
+Dashboard do usuario autenticado:
+
+- `GET /api/v1/me/dashboard/summary`
+- `GET /api/v1/me/dashboard/cash-flow`
+- `GET /api/v1/me/dashboard/categories`
+- `GET /api/v1/me/transactions`
+- `GET /api/v1/me/transactions/{transaction_id}`
+- `GET /api/v1/me/pending-transactions`
+- `GET /api/v1/me/export`
+
+Dashboard administrativo, sempre com `role=ADMIN`:
+
+- `GET /api/v1/admin/dashboard/summary`
+- `GET /api/v1/admin/dashboard/activity`
+- `GET /api/v1/admin/dashboard/users`
+- `GET /api/v1/admin/dashboard/transactions`
+- `GET /api/v1/admin/dashboard/categories`
+- `GET /api/v1/admin/dashboard/performance`
+- `GET /api/v1/admin/dashboard/errors`
+- `GET /api/v1/admin/dashboard/integrations`
+
+## Vinculo Telegram E Lovable
+
+1. O usuario envia `/vincular` ao bot.
+2. O bot gera um codigo aleatorio valido por 10 minutos e por um unico uso.
+3. O Lovable envia codigo, e-mail e senha para `POST /api/v1/auth/telegram-link`.
+4. A API retorna access token curto e refresh token rotativo para o mesmo usuario do Telegram.
+5. O Lovable usa `Authorization: Bearer ACCESS_TOKEN`; nunca envia `telegram_user_id`.
+
+## Lovable
+
+Configure no projeto Lovable durante o build:
+
+```env
+VITE_FINBOT_API_URL=https://seu-servico.onrender.com
+```
+
+Centralize a URL em um unico cliente HTTP e acrescente `/api/v1` nas chamadas. Variaveis `VITE_*` sao incorporadas no build; altere a configuracao e publique novamente quando a URL mudar. A API permite apenas origens listadas em `CORS_ALLOWED_ORIGINS`.
+
+## URL Estavel
+
+O arquivo `render.yaml` prepara um web service com URL HTTPS fixa. Depois do deploy:
+
+```powershell
+python scripts/set_telegram_webhook.py --url https://seu-servico.onrender.com
+```
+
+LocalTunnel fica restrito ao desenvolvimento. Para iniciar o tunel e atualizar o webhook automaticamente:
+
+```powershell
+python scripts/dev_tunnel.py
+```
+
+O token nao e impresso pelo script.
+
+## Qualidade
+
+```powershell
+python -m pytest
+python -m ruff check .
+python -m compileall src tests scripts
+```
+
+Detalhes de configuracao e deploy: [docs/deploy.md](docs/deploy.md). Arquitetura: [docs/architecture.md](docs/architecture.md).
