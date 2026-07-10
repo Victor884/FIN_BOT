@@ -62,6 +62,7 @@ Autenticacao web:
 - `POST /api/v1/auth/refresh`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `POST /api/v1/ai/completions` (Groq opcional e autenticada)
 
 Dashboard do usuario autenticado:
 
@@ -127,3 +128,16 @@ python -m compileall src tests scripts
 ```
 
 Detalhes de configuracao e deploy: [docs/deploy.md](docs/deploy.md). Arquitetura: [docs/architecture.md](docs/architecture.md).
+
+Tutorial completo para executar localmente: [docs/tutorial-local.md](docs/tutorial-local.md).
+
+## Frontend Local
+
+```powershell
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+O frontend usa `VITE_FINBOT_API_URL=http://127.0.0.1:8000` e abre em
+`http://127.0.0.1:8080`.

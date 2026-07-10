@@ -23,9 +23,29 @@ OPENAI_API_KEY=
 ADMIN_EMAIL=
 ADMIN_PASSWORD=
 AUTH_ALLOW_REGISTRATION=false
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.1-8b-instant
+GROQ_TIMEOUT_SECONDS=8
+GROQ_MAX_PROMPT_CHARS=4000
+GROQ_MAX_OUTPUT_TOKENS=300
+GROQ_REQUESTS_PER_MINUTE=10
 ```
 
 Nunca coloque credenciais em Git, `render.yaml`, codigo TypeScript ou logs.
+
+Crie a chave em `https://console.groq.com/keys`. Os limites variam por plano,
+organização e modelo; confira os valores atuais em
+`https://console.groq.com/docs/rate-limits`. A API retorna `429` quando algum
+limite é atingido.
+
+Teste local sem expor a chave ao frontend:
+
+```powershell
+$headers = @{ Authorization = "Bearer SEU_ACCESS_TOKEN" }
+$body = @{ prompt = "Explique meu orçamento em termos simples" } | ConvertTo-Json
+Invoke-RestMethod http://127.0.0.1:8000/api/v1/ai/completions `
+  -Method Post -Headers $headers -ContentType application/json -Body $body
+```
 
 ## Banco
 

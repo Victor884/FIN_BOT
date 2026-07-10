@@ -43,6 +43,16 @@ Contas, cartoes e transacoes possuem `user_id`. Nomes de conta e cartao sao unic
 - `application_errors`: codigo normalizado, endpoint e integracao, sem stack trace ou mensagem financeira.
 - Retencao padrao: 90 dias, aplicada na inicializacao e configuravel por `METRICS_RETENTION_DAYS`.
 
+## Groq
+
+`GroqService` concentra a chamada assíncrona à API, pooling, timeout e parsing da
+resposta. `POST /api/v1/ai/completions` exige JWT, valida o prompt e aplica limite
+por usuário. A chave permanece apenas no backend e o log registra tamanho,
+modelo, status e duração, nunca o conteúdo do prompt.
+
+O limitador atual é local ao processo. Em deploy com múltiplas réplicas, substitua
+por um contador compartilhado em Redis ou PostgreSQL.
+
 ## Contrato HTTP
 
 Respostas `/api/v1` usam envelope com `success`, `data`, `message`, `request_id` e `timestamp`. Erros acrescentam `error.code` e detalhes de validacao sem expor internals. O header `X-Request-ID` e devolvido em todas as respostas.
