@@ -46,6 +46,7 @@ def public_config(request: Request) -> ApiResponse[PublicConfig]:
                 "telegram": bool(settings.telegram_bot_token),
                 "google_sheets": bool(settings.google_sheets_spreadsheet_id),
                 "ai": settings.ai_enabled,
+                "groq": bool(settings.groq_api_key),
             },
         ),
         request_id=request.state.request_id,

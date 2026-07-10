@@ -19,6 +19,8 @@ services:
         value: "false"
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      - key: CORS_ALLOWED_ORIGIN_REGEX
+        value: https://.*\.(lovable\.app|lovableproject\.com)
       - key: PUBLIC_API_URL
         sync: false
       - key: DATABASE_URL
@@ -39,3 +41,9 @@ services:
         value: "8"
       - key: METRICS_RETENTION_DAYS
         value: "90"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+      - key: GROQ_REQUESTS_PER_MINUTE
+        value: "10"

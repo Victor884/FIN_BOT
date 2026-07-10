@@ -280,6 +280,10 @@ class AdminDashboardService:
                 name="ai",
                 status="enabled" if self._settings.ai_enabled else "disabled",
             ),
+            IntegrationState(
+                name="groq",
+                status="configured" if self._settings.groq_api_key else "not_configured",
+            ),
         ]
 
     def _daily_count(self, model, start_date: date, end_date: date) -> dict[str, int]:  # type: ignore[no-untyped-def]

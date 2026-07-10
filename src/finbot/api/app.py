@@ -7,6 +7,7 @@ from finbot.api.errors import register_error_handlers
 from finbot.api.middleware import register_request_logging
 from finbot.api.routes.health import router as health_router
 from finbot.api.routes.auth import router as auth_router
+from finbot.api.routes.ai import router as ai_router
 from finbot.api.routes.admin_dashboard import router as admin_dashboard_router
 from finbot.api.routes.user_dashboard import router as user_dashboard_router
 from finbot.api.routes.telegram import router as telegram_router
@@ -16,6 +17,8 @@ from finbot.db.session import create_database_schema, create_session_factory
 from finbot.sheets.client import GoogleSheetsClient
 from finbot.telegram.client import TelegramClient
 from finbot.services.auth import bootstrap_admin
+from finbot.ai.groq_service import GroqService
+from finbot.services.rate_limit import InMemoryRateLimiter
 from finbot.parser.factory import build_financial_parser
 from finbot.core.errors import ConfigurationError
 from finbot.core.metrics import apply_retention_policy
@@ -35,6 +38,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         if app.state.telegram_client is not None:
             await app.state.telegram_client.close()
+        if app.state.groq_service is not None:
+            await app.state.groq_service.close()
 
     app = FastAPI(
         title=app_settings.app_name,
@@ -45,6 +50,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = app_settings
     app.state.session_factory = create_session_factory(app_settings)
     app.state.financial_parser = build_financial_parser(app_settings)
+    app.state.groq_service = GroqService.from_settings(app_settings)
+    app.state.groq_rate_limiter = InMemoryRateLimiter(app_settings.groq_requests_per_minute)
     with app.state.session_factory() as session:
         bootstrap_admin(session, app_settings)
         apply_retention_policy(session, app_settings.metrics_retention_days)
@@ -60,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.csv_values("cors_allowed_origins"),
+        allow_origin_regex=app_settings.cors_allowed_origin_regex,
         allow_credentials=app_settings.cors_allow_credentials,
         allow_methods=app_settings.csv_values("cors_allowed_methods"),
         allow_headers=app_settings.csv_values("cors_allowed_headers"),
@@ -69,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_error_handlers(app)
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(ai_router)
     app.include_router(admin_dashboard_router)
     app.include_router(user_dashboard_router)
     app.include_router(telegram_router)

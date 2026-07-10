@@ -110,6 +110,7 @@ def _error_code(status_code: int) -> str:
         409: "CONFLICT",
         422: "VALIDATION_ERROR",
         429: "RATE_LIMITED",
+        502: "BAD_GATEWAY",
         503: "SERVICE_UNAVAILABLE",
     }.get(status_code, "INTERNAL_ERROR")
 
@@ -121,5 +122,6 @@ def _friendly_message(status_code: int, detail: str) -> str:
         401: "Sua sessao expirou ou nao e valida.",
         403: "Voce nao tem permissao para acessar este recurso.",
         429: "Muitas solicitacoes. Tente novamente em instantes.",
+        502: "A integracao externa retornou uma resposta invalida.",
         503: "O servico esta temporariamente indisponivel.",
     }.get(status_code, "Nao foi possivel processar a solicitacao.")

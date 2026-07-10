@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     google_service_account_file: str | None = None
     log_level: str = "INFO"
     cors_allowed_origins: str = "http://localhost:5173"
+    cors_allowed_origin_regex: str | None = None
     cors_allowed_methods: str = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
     cors_allowed_headers: str = "Authorization,Content-Type,X-Request-ID"
     cors_allow_credentials: bool = True
@@ -33,6 +34,13 @@ class Settings(BaseSettings):
     admin_password: str | None = None
     public_api_url: str | None = None
     metrics_retention_days: int = 90
+    groq_api_key: str | None = None
+    groq_model: str = "llama-3.1-8b-instant"
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_timeout_seconds: float = 8.0
+    groq_max_prompt_chars: int = 4000
+    groq_max_output_tokens: int = 300
+    groq_requests_per_minute: int = 10
 
 
     def csv_values(self, field_name: str) -> list[str]:

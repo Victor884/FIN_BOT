@@ -168,7 +168,10 @@ def test_transaction_pagination_and_empty_state(tmp_path) -> None:  # type: igno
 
 
 def test_health_and_cors_contracts(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    app = make_app(tmp_path)
+    app = make_app(
+        tmp_path,
+        cors_allowed_origin_regex=r"https://.*\.(lovable\.app|lovableproject\.com)",
+    )
     client = TestClient(app)
 
     ready = client.get("/health/ready")
@@ -189,6 +192,16 @@ def test_health_and_cors_contracts(tmp_path) -> None:  # type: ignore[no-untyped
         headers={"Origin": "https://unknown.example", "Access-Control-Request-Method": "GET"},
     )
     assert denied.status_code == 400
+
+    lovable = client.options(
+        "/api/v1/config/public",
+        headers={
+            "Origin": "https://painel-finbot.lovable.app",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert lovable.status_code == 200
+    assert lovable.headers["access-control-allow-origin"] == "https://painel-finbot.lovable.app"
 
 
 def test_telegram_link_connects_web_login_to_existing_user(tmp_path) -> None:  # type: ignore[no-untyped-def]
