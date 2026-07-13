@@ -1,17 +1,17 @@
 # FIN_BOT
 
-Assistente financeiro pessoal com Telegram, FastAPI, SQLAlchemy, Google Sheets opcional e uma API autenticada para dashboards externos como o Lovable.
+Assistente financeiro pessoal com Telegram, FastAPI, SQLAlchemy, exportacao CSV e uma API autenticada para dashboards externos como o Lovable. Google Sheets e opcional e permanece desligado por padrao.
 
 ## Arquitetura
 
 ```text
 Telegram -> Webhook FastAPI -> Parser local -> IA opcional -> Validacao -> Banco
-                                                        \-> Sheets em background
+                                                        \-> Confirmacao quando a confianca for baixa
 
 Lovable -> JWT -> API /api/v1 -> Servicos de dashboard -> Banco
 ```
 
-O parser local atende mensagens previsiveis. A IA so e acionada quando o resultado local esta incompleto, ambiguo ou abaixo do limite de confianca. O Google Sheets roda depois da resposta do Telegram.
+O parser local atende mensagens previsiveis. A IA so e acionada quando o resultado local esta incompleto, ambiguo ou abaixo do limite de confianca. Lancamentos incertos aguardam `SIM` ou `NAO`; `/exportar` envia um CSV privado no Telegram.
 
 ## Modulos
 
@@ -29,7 +29,7 @@ O parser local atende mensagens previsiveis. A IA so e acionada quando o resulta
 ```powershell
 python -m pip install -e ".[dev]"
 Copy-Item .env.example .env
-python -m alembic upgrade head
+python scripts/bootstrap_database.py
 python -m uvicorn finbot.api.app:app --reload
 ```
 
@@ -53,6 +53,8 @@ Infraestrutura:
 Telegram:
 
 - `POST /telegram/webhook`
+
+Comandos relevantes: `/editar`, `/excluir`, `/categoria adicionar nome`, `/categoria remover nome` e `/exportar`. Parcelas podem ser informadas como `em 3x`; recorrencias mensais usam `todo mes`.
 
 Autenticacao web:
 

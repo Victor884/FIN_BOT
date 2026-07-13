@@ -82,6 +82,10 @@ class CardRecord(Base):
 
 class TransactionRecord(Base):
     __tablename__ = "transactions"
+    __table_args__ = (
+        Index("ix_transactions_user_date", "user_id", "transaction_date"),
+        Index("ix_transactions_user_status_date", "user_id", "status", "transaction_date"),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     user_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
@@ -95,6 +99,10 @@ class TransactionRecord(Base):
     account_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
     card_name: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     is_recurring: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    installment_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    installment_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    installment_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    balance_applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
     dedupe_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
@@ -125,6 +133,7 @@ class TransactionRecord(Base):
             account_to=draft.account_to,
             card_name=draft.card_name,
             is_recurring=draft.is_recurring,
+            installment_total=draft.installment_total,
             status=draft.status.value,
             confidence=Decimal(str(draft.confidence)),
             dedupe_key=dedupe_key,
@@ -143,6 +152,7 @@ class TransactionRecord(Base):
             account_to=self.account_to,
             card_name=self.card_name,
             is_recurring=self.is_recurring,
+            installment_total=self.installment_total,
             status=TransactionStatus(self.status),
             confidence=float(self.confidence),
         )
@@ -242,6 +252,59 @@ class WebLinkCodeRecord(Base):
     code_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class CategoryRecord(Base):
+    __tablename__ = "categories"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_categories_user_name"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class TelegramConversationRecord(Base):
+    __tablename__ = "telegram_conversations"
+
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    action: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+
+
+class RecurringTransactionRecord(Base):
+    __tablename__ = "recurring_transactions"
+    __table_args__ = (Index("ix_recurring_transactions_due", "is_active", "next_due_date"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    payment_method: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    account_from: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    account_to: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    card_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    next_due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    remaining_occurrences: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    installment_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    next_installment_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    installment_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )

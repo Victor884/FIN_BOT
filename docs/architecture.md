@@ -7,19 +7,19 @@
 3. O usuario e localizado por `telegram_user_id`. No primeiro uso, dados legados sem proprietario sao associados ao primeiro usuario Telegram.
 4. O parser deterministico interpreta a mensagem e calcula sua confianca.
 5. Com IA habilitada, apenas resultados incertos usam o parser externo.
-6. Validacao, deduplicacao financeira e persistencia executam em uma sessao SQLAlchemy.
-7. A resposta usa um `httpx.AsyncClient` reutilizavel com pool e timeout explicito.
-8. A sincronizacao com Google Sheets ocorre em background e atualiza `sheets_synced`.
+6. Baixa confianca abre uma conversa persistida por 10 minutos; o usuario responde `SIM` ou `NAO` antes da gravacao.
+7. Validacao, deduplicacao financeira e persistencia executam em uma sessao SQLAlchemy.
+8. A resposta usa um `httpx.AsyncClient` reutilizavel com pool e timeout explicito. `/exportar` envia um CSV no chat.
 
 Tempos de parser, validacao, banco, IA, Telegram e total sao registrados sem armazenar o texto financeiro integral.
 
 ## Runtime
 
 - Uma engine SQLAlchemy e uma fabrica de sessoes sao reutilizadas por URL de banco.
-- O schema nao e recriado por webhook; Alembic roda na inicializacao e tambem pode ser executado manualmente.
+- O schema nao e recriado por webhook. Em producao `DATABASE_AUTO_MIGRATE=false` e `scripts/bootstrap_database.py` executa Alembic e o bootstrap administrativo de forma explicita; localmente a opcao pode ficar habilitada para SQLite descartavel.
 - Sessoes sao abertas por requisicao e fechadas com commit ou rollback.
 - Clientes HTTP usam connection pooling, connect timeout de 3 segundos e read timeout de 8 segundos por padrao.
-- Sheets permanece fora do caminho critico.
+- Rotinas agendadas geram recorrencias, aplicam parcelas vencidas e produzem backups CSV no Supabase Storage configurado.
 
 ## Identidade
 
@@ -36,12 +36,14 @@ Valores monetarios usam `Decimal`/`Numeric`, nunca `float`. Datas de negocio usa
 
 Contas, cartoes e transacoes possuem `user_id`. Nomes de conta e cartao sao unicos apenas dentro de cada usuario.
 
+Categorias personalizadas, conversas do Telegram e agendas recorrentes tambem pertencem ao usuario. Consultas frequentes por usuario, status e data usam indices compostos para manter o caminho pronto para PostgreSQL/Supabase.
+
 ## Observabilidade
 
 - `request_metrics`: endpoint, metodo, status, duracao, origem e request ID.
 - `telegram_updates`: idempotencia e tempos das etapas do bot.
 - `application_errors`: codigo normalizado, endpoint e integracao, sem stack trace ou mensagem financeira.
-- Retencao padrao: 90 dias, aplicada na inicializacao e configuravel por `METRICS_RETENTION_DAYS`.
+- Retencao padrao: 90 dias, aplicada pela rotina agendada e configuravel por `METRICS_RETENTION_DAYS`.
 
 ## Groq
 

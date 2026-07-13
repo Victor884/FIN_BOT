@@ -50,6 +50,20 @@ class TelegramClient:
         response.raise_for_status()
         return dict(response.json())
 
+    async def send_document_async(
+        self, chat_id: int | str, content: bytes, filename: str, caption: str | None = None
+    ) -> dict[str, object]:
+        data: dict[str, str] = {"chat_id": str(chat_id)}
+        if caption:
+            data["caption"] = caption
+        response = await self._async_client.post(
+            f"{self._base_url}/bot{self._bot_token}/sendDocument",
+            data=data,
+            files={"document": (filename, content, "text/csv")},
+        )
+        response.raise_for_status()
+        return dict(response.json())
+
     async def close(self) -> None:
         await self._async_client.aclose()
         if self._sync_client is not None:

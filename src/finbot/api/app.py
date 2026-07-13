@@ -16,12 +16,10 @@ from finbot.core.settings import Settings
 from finbot.db.session import create_database_schema, create_session_factory
 from finbot.sheets.client import GoogleSheetsClient
 from finbot.telegram.client import TelegramClient
-from finbot.services.auth import bootstrap_admin
 from finbot.ai.groq_service import GroqService
 from finbot.services.rate_limit import InMemoryRateLimiter
 from finbot.parser.factory import build_financial_parser
 from finbot.core.errors import ConfigurationError
-from finbot.core.metrics import apply_retention_policy
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -32,7 +30,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if "*" in app_settings.csv_values("cors_allowed_origins"):
             raise ConfigurationError("Wildcard CORS is not allowed in production")
     configure_logging(app_settings.log_level)
-    create_database_schema(app_settings)
+    if app_settings.database_auto_migrate:
+        create_database_schema(app_settings)
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         yield
@@ -52,16 +51,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.financial_parser = build_financial_parser(app_settings)
     app.state.groq_service = GroqService.from_settings(app_settings)
     app.state.groq_rate_limiter = InMemoryRateLimiter(app_settings.groq_requests_per_minute)
-    with app.state.session_factory() as session:
-        bootstrap_admin(session, app_settings)
-        apply_retention_policy(session, app_settings.metrics_retention_days)
-        session.commit()
     app.state.telegram_client = (
         TelegramClient.from_settings(app_settings) if app_settings.telegram_bot_token else None
     )
     app.state.sheets_client = (
         GoogleSheetsClient.from_settings(app_settings)
-        if app_settings.google_sheets_spreadsheet_id and app_settings.google_service_account_file
+        if app_settings.google_sheets_active
         else None
     )
     app.add_middleware(

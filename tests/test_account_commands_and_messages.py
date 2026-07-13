@@ -4,7 +4,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from finbot.db.base import Base
-from finbot.db.repositories import AccountRepository, CardRepository, TransactionRepository
+from finbot.db.repositories import (
+    AccountRepository,
+    CardRepository,
+    CategoryRepository,
+    ConversationRepository,
+    RecurringTransactionRepository,
+    TransactionRepository,
+)
 from finbot.parser.rules import RuleBasedParser
 from finbot.services.messages import BotMessageService, split_financial_entries
 from finbot.services.transactions import TransactionEntryService
@@ -18,6 +25,9 @@ def make_service() -> tuple[BotMessageService, AccountRepository, TransactionRep
     account_repository = AccountRepository(session)
     card_repository = CardRepository(session)
     transaction_repository = TransactionRepository(session)
+    category_repository = CategoryRepository(session)
+    conversation_repository = ConversationRepository(session)
+    recurring_repository = RecurringTransactionRepository(session)
     parser = RuleBasedParser(today_provider=lambda: date(2026, 7, 9))
     transaction_service = TransactionEntryService(
         repository=transaction_repository,
@@ -25,13 +35,18 @@ def make_service() -> tuple[BotMessageService, AccountRepository, TransactionRep
         account_repository=account_repository,
         card_repository=card_repository,
     )
+    service = BotMessageService(
+        transaction_service=transaction_service,
+        transaction_repository=transaction_repository,
+        account_repository=account_repository,
+        card_repository=card_repository,
+        category_repository=category_repository,
+        conversation_repository=conversation_repository,
+        recurring_repository=recurring_repository,
+    )
+    service.bind_user("test-user")
     return (
-        BotMessageService(
-            transaction_service=transaction_service,
-            transaction_repository=transaction_repository,
-            account_repository=account_repository,
-            card_repository=card_repository,
-        ),
+        service,
         account_repository,
         transaction_repository,
         card_repository,
@@ -47,6 +62,28 @@ def test_add_and_list_accounts() -> None:
     assert "Conta cadastrada: Banco Inter" in add_message
     assert "Banco Inter: R$ 1000,00" in list_message
     assert "Saldo total: R$ 1000,00" in list_message
+
+
+def test_add_account_command_accepts_name_and_balance_without_type() -> None:
+    service, account_repository, _, _ = make_service()
+
+    message = service.handle_text("/addconta Inter saldo 2000").message
+    account = account_repository.get_by_name("Banco Inter")
+
+    assert message == "Conta cadastrada: Banco Inter com saldo R$ 2000,00."
+    assert account is not None
+    assert account.type == "banco"
+
+
+def test_add_account_command_accepts_short_balance_form_and_currency() -> None:
+    service, account_repository, _, _ = make_service()
+
+    message = service.handle_text("/addconta Cofrinho R$ 1.250,50").message
+    account = account_repository.get_by_name("Cofrinho")
+
+    assert message == "Conta cadastrada: Cofrinho com saldo R$ 1250,50."
+    assert account is not None
+    assert account.type == "banco"
 
 
 def test_add_account_from_natural_text_with_name_and_balance() -> None:
@@ -287,12 +324,67 @@ def test_summary_and_export_commands() -> None:
     assert "Resumo do mes:" in summary.message
     assert "Receitas:" in summary.message
     assert export.status == "export"
-    assert "Google Sheets" in export.message
+    assert "CSV" in export.message
 
 
 def test_cancel_edit_delete_commands_are_friendly() -> None:
     service, _, _, _ = make_service()
+    service.handle_text("Gastei R$ 45 no mercado")
 
     assert service.handle_text("/cancelar").message == "Operacao pendente cancelada."
-    assert "ainda nao esta habilitada" in service.handle_text("/editar").message
-    assert "ainda nao esta habilitada" in service.handle_text("/excluir").message
+    assert "Qual lancamento voce quer editar" in service.handle_text("/editar").message
+    assert "Qual lancamento voce quer excluir" in service.handle_text("/excluir").message
+
+
+def test_low_confidence_transaction_requires_confirmation() -> None:
+    service, _, transaction_repository, _ = make_service()
+    service._transaction_service._confirmation_threshold = 0.9
+
+    pending = service.handle_text("Gastei R$ 45 no mercado")
+    assert transaction_repository.list() == []
+    confirmed = service.handle_text("SIM")
+
+    assert pending.status == "confirmation_required"
+    assert confirmed.status == "recorded"
+    assert len(transaction_repository.list()) == 1
+
+
+def test_edit_and_delete_flow_updates_the_selected_transaction() -> None:
+    service, _, transaction_repository, _ = make_service()
+    service.handle_text("Gastei R$ 45 no mercado")
+
+    service.handle_text("/editar")
+    selected = service.handle_text("1")
+    updated = service.handle_text("Gastei R$ 55 em Uber categoria transporte")
+    record = transaction_repository.list()[0]
+
+    assert selected.status == "edit_waiting_text"
+    assert updated.status == "recorded"
+    assert record.amount == 55
+    assert record.category == "transporte"
+
+    service.handle_text("/excluir")
+    service.handle_text("1")
+    deleted = service.handle_text("SIM")
+
+    assert deleted.status == "deleted"
+    assert transaction_repository.list() == []
+
+
+def test_custom_categories_installments_and_recurring_schedule() -> None:
+    service, _, transaction_repository, _ = make_service()
+
+    assert "Categoria personalizada salva" in service.handle_text("/categoria adicionar Pet").message
+    assert "pet" in service.handle_text("/categorias").message
+
+    installments = service.handle_text("Gastei R$ 120 no veterinario categoria pet em 3x")
+    records = transaction_repository.list()
+    assert installments.status == "recorded"
+    assert len(records) == 3
+    assert {record.amount for record in records} == {40}
+    assert {record.installment_number for record in records} == {1, 2, 3}
+
+    recurring = service.handle_text("Gastei R$ 20 na assinatura categoria lazer todo mes")
+    assert recurring.status == "recorded"
+    assert service._recurring_service is not None
+    assert service._recurring_service.generate_due(date(2026, 8, 9)) == 1

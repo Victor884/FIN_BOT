@@ -7,6 +7,7 @@ Backend:
 ```env
 APP_ENV=production
 DATABASE_URL=postgresql+psycopg://usuario:senha@host:5432/finbot
+DATABASE_AUTO_MIGRATE=false
 JWT_SECRET=valor-aleatorio-com-pelo-menos-32-caracteres
 CORS_ALLOWED_ORIGINS=https://seu-projeto.lovable.app
 TELEGRAM_BOT_TOKEN=definido-como-secret
@@ -18,6 +19,11 @@ Opcionais:
 ```env
 GOOGLE_SHEETS_SPREADSHEET_ID=
 GOOGLE_SERVICE_ACCOUNT_FILE=
+GOOGLE_SHEETS_ENABLED=false
+TRANSACTION_CONFIRMATION_THRESHOLD=0.75
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_BACKUP_BUCKET=finbot-backups
 AI_ENABLED=false
 OPENAI_API_KEY=
 ADMIN_EMAIL=
@@ -53,14 +59,22 @@ Localmente, use `sqlite:///./data/finbot.sqlite3`. Em um host gratuito com files
 
 O PostgreSQL gratuito do Render expira depois de 30 dias. Ele serve para testes temporarios, nao para armazenamento permanente. Para uso real, escolha um PostgreSQL persistente e mantenha backups.
 
-Migracoes:
+Migracoes e bootstrap sao executados explicitamente antes da API:
 
 ```powershell
-python -m alembic upgrade head
+python scripts/bootstrap_database.py
 python -m alembic current
 ```
 
-A aplicacao tambem aplica migracoes pendentes na inicializacao.
+Com `DATABASE_AUTO_MIGRATE=false`, a API de producao nao executa migracoes na inicializacao. Em plataformas serverless isso evita que duas instancias tentem alterar o banco simultaneamente.
+
+Para gerar recorrencias, aplicar parcelas vencidas e salvar um CSV diario por usuario no Supabase Storage privado, agende diariamente:
+
+```powershell
+python scripts/run_financial_jobs.py
+```
+
+Crie o bucket privado `finbot-backups` no Supabase e mantenha `SUPABASE_SERVICE_ROLE_KEY` somente no backend.
 
 ## Render
 

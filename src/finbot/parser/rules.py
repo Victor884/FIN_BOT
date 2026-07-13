@@ -47,6 +47,7 @@ TRANSFER_KEYWORDS = (
 )
 PENDING_KEYWORDS = ("vou pagar", "pendente", "a pagar", "vencimento", "vence")
 RECURRING_KEYWORDS = ("todo mes", "mensal", "recorrente", "fixo", "fixa")
+INSTALLMENT_PATTERN = re.compile(r"\b(?:em\s+)?(\d{1,2})\s*[xX]\b")
 
 CATEGORY_ALIASES = {
     "alimentacao": (
@@ -105,6 +106,7 @@ class RuleBasedParser:
         description = _build_description(normalized_text, amount)
         status = _detect_status(normalized_text, transaction_type)
         is_recurring = any(keyword in normalized_text for keyword in RECURRING_KEYWORDS)
+        installment_total = _extract_installment_total(normalized_text)
 
         draft = TransactionDraft(
             type=transaction_type,
@@ -116,6 +118,7 @@ class RuleBasedParser:
             account_from=account_from,
             account_to=account_to,
             is_recurring=is_recurring,
+            installment_total=installment_total,
             status=status,
             confidence=0.85,
         )
@@ -181,6 +184,14 @@ def _detect_explicit_category(normalized_text: str) -> str | None:
         return None
     category = _clean_fragment(match.group(1)).replace(" ", "_")
     return category or None
+
+
+def _extract_installment_total(normalized_text: str) -> int | None:
+    match = INSTALLMENT_PATTERN.search(normalized_text)
+    if not match:
+        return None
+    installments = int(match.group(1))
+    return installments if installments >= 2 else None
 
 
 def _extract_amount(normalized_text: str) -> Decimal | None:

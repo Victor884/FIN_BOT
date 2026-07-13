@@ -204,6 +204,31 @@ def test_health_and_cors_contracts(tmp_path) -> None:  # type: ignore[no-untyped
     assert lovable.headers["access-control-allow-origin"] == "https://painel-finbot.lovable.app"
 
 
+def test_google_sheets_stays_disabled_even_with_credentials(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    app = make_app(
+        tmp_path,
+        google_sheets_enabled=False,
+        google_sheets_spreadsheet_id="sheet-id",
+        google_service_account_file="missing-service-account.json",
+    )
+    admin = add_user(app, "admin@example.com", role="ADMIN")
+    client = TestClient(app)
+
+    public_config = client.get("/api/v1/config/public")
+    integrations = client.get(
+        "/api/v1/admin/dashboard/integrations",
+        headers={"Authorization": f"Bearer {token_for(app, admin)}"},
+    )
+
+    assert app.state.sheets_client is None
+    assert public_config.json()["data"]["features"]["google_sheets"] is False
+    assert integrations.status_code == 200
+    integration_status = {
+        item["name"]: item["status"] for item in integrations.json()["data"]
+    }
+    assert integration_status["google_sheets"] == "disabled"
+
+
 def test_telegram_link_connects_web_login_to_existing_user(tmp_path) -> None:  # type: ignore[no-untyped-def]
     app = make_app(tmp_path)
     with app.state.session_factory() as session:

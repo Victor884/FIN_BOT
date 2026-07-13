@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
 from finbot.core.settings import Settings
@@ -12,6 +13,10 @@ from finbot.db.base import Base
 @lru_cache(maxsize=8)
 def get_engine(database_url: str) -> Engine:
     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+    if database_url.startswith("sqlite"):
+        url = make_url(database_url)
+        if url.database and url.database != ":memory:":
+            Path(url.database).expanduser().parent.mkdir(parents=True, exist_ok=True)
     return create_engine(
         database_url,
         future=True,
@@ -39,6 +44,11 @@ def create_database_schema(settings: Settings) -> None:
     engine = get_engine(settings.database_url)
     _run_migrations(engine)
     Base.metadata.create_all(bind=engine)
+
+
+def bootstrap_database(settings: Settings) -> None:
+    """Explicit schema bootstrap for local setup and deployment release jobs."""
+    create_database_schema(settings)
 
 
 def _run_migrations(engine: Engine) -> None:

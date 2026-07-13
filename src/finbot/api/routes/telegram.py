@@ -8,12 +8,21 @@ from fastapi.concurrency import run_in_threadpool
 
 from finbot.core.settings import Settings
 from finbot.db.models import TelegramUpdateRecord
-from finbot.db.repositories import AccountRepository, CardRepository, TransactionRepository, UserRepository
+from finbot.db.repositories import (
+    AccountRepository,
+    CardRepository,
+    CategoryRepository,
+    ConversationRepository,
+    RecurringTransactionRepository,
+    TransactionRepository,
+    UserRepository,
+)
 from finbot.db.session import create_session_factory
 from finbot.sheets.client import GoogleSheetsClient
 from finbot.sheets.rows import transaction_to_sheet_row
 from finbot.services.messages import BotMessageService
 from finbot.services.transactions import TransactionEntryService
+from finbot.services.user_dashboard_service import UserDashboardService
 from finbot.telegram.client import TelegramClient
 from finbot.telegram.schemas import TelegramUpdate
 
@@ -30,6 +39,15 @@ async def _send_telegram_message(
     send_result = telegram_client.send_message(chat_id=chat_id, text=text)  # type: ignore[attr-defined]
     if inspect.isawaitable(send_result):
         await send_result
+
+
+async def _send_telegram_document(
+    telegram_client: TelegramClient | object, chat_id: int | str, content: bytes, filename: str
+) -> None:
+    if hasattr(telegram_client, "send_document_async"):
+        await telegram_client.send_document_async(  # type: ignore[attr-defined]
+            chat_id=chat_id, content=content, filename=filename
+        )
 
 
 def get_settings(request: Request) -> Settings:
@@ -52,6 +70,7 @@ def get_transaction_entry_service(
                 parser=parser,
                 account_repository=account_repository,
                 card_repository=card_repository,
+                confirmation_threshold=settings.transaction_confirmation_threshold,
             )
             session.commit()
         except Exception:
@@ -69,18 +88,25 @@ def get_bot_message_service(
             transaction_repository = TransactionRepository(session)
             account_repository = AccountRepository(session)
             card_repository = CardRepository(session)
+            category_repository = CategoryRepository(session)
+            conversation_repository = ConversationRepository(session)
+            recurring_repository = RecurringTransactionRepository(session)
             parser = request.app.state.financial_parser
             transaction_service = TransactionEntryService(
                 repository=transaction_repository,
                 parser=parser,
                 account_repository=account_repository,
                 card_repository=card_repository,
+                confirmation_threshold=settings.transaction_confirmation_threshold,
             )
             yield BotMessageService(
                 transaction_service=transaction_service,
                 transaction_repository=transaction_repository,
                 account_repository=account_repository,
                 card_repository=card_repository,
+                category_repository=category_repository,
+                conversation_repository=conversation_repository,
+                recurring_repository=recurring_repository,
             )
             session.commit()
         except Exception:
@@ -140,28 +166,26 @@ async def telegram_webhook(
     sheet_synced = False
     telegram_replied = False
 
-    if result.status == "export":
-        if sheets_client is not None:
+    if result.status == "export" and telegram_client is not None and service.user_id is not None:
+        try:
+            csv_data = UserDashboardService(service.session, service.user_id).export_csv(None, None)
+            await _send_telegram_document(
+                telegram_client,
+                update.message.chat.id,
+                csv_data.encode("utf-8-sig"),
+                "finbot-transacoes.csv",
+            )
             result = type(result)(
                 status=result.status,
-                message=(
-                    "Vou atualizar o Google Sheets em segundo plano. "
-                    "Te aviso aqui quando terminar."
-                ),
+                message="Arquivo CSV enviado.",
                 records=result.records,
                 entry_results=result.entry_results,
             )
-            sheet_synced = True
-            background_tasks.add_task(
-                _setup_sheets_and_notify,
-                sheets_client,
-                telegram_client,
-                update.message.chat.id,
-            )
-        else:
+        except Exception:
+            logger.exception("telegram_csv_export_failed chat_id=%s", update.message.chat.id)
             result = type(result)(
                 status=result.status,
-                message="Google Sheets nao esta configurado neste ambiente.",
+                message="Nao consegui gerar o CSV agora. Tente novamente em alguns instantes.",
                 records=result.records,
                 entry_results=result.entry_results,
             )

@@ -16,8 +16,14 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     ai_provider: str = "openai"
     ai_enabled: bool = False
+    google_sheets_enabled: bool = False
     google_sheets_spreadsheet_id: str | None = None
     google_service_account_file: str | None = None
+    transaction_confirmation_threshold: float = 0.75
+    database_auto_migrate: bool = True
+    supabase_url: str | None = None
+    supabase_service_role_key: str | None = None
+    supabase_backup_bucket: str | None = None
     log_level: str = "INFO"
     cors_allowed_origins: str = "http://localhost:5173"
     cors_allowed_origin_regex: str | None = None
@@ -42,6 +48,13 @@ class Settings(BaseSettings):
     groq_max_output_tokens: int = 300
     groq_requests_per_minute: int = 10
 
+    @property
+    def google_sheets_configured(self) -> bool:
+        return bool(self.google_sheets_spreadsheet_id and self.google_service_account_file)
+
+    @property
+    def google_sheets_active(self) -> bool:
+        return self.google_sheets_enabled and self.google_sheets_configured
 
     def csv_values(self, field_name: str) -> list[str]:
         value = getattr(self, field_name)

@@ -126,6 +126,36 @@ class AccountService:
         if not payload:
             return "Informe nome, tipo e saldo. Exemplo: /addconta Banco Inter banco saldo 1000"
 
+        has_explicit_type = re.search(
+            r"\s+(?:banco|carteira|cartao|poupanca|investimento|outro)(?:\s+saldo)?"
+            r"\s+(?:r\$\s*)?[\d.,]+$",
+            payload,
+            flags=re.IGNORECASE,
+        )
+        short_match = None
+        if not has_explicit_type:
+            short_match = re.search(
+                r"^(?P<name>.+?)(?:\s+saldo)?\s+(?:r\$\s*)?(?P<balance>[\d.,]+)$",
+                payload,
+                flags=re.IGNORECASE,
+            )
+        if short_match:
+            raw_name = short_match.group("name")
+            name = AccountResolverStub.canonical_name_for(raw_name) or display_account_name(raw_name)
+            account_type = infer_account_type(name)
+            if account_type == AccountType.OTHER:
+                account_type = AccountType.BANK
+            balance = parse_decimal(short_match.group("balance"))
+            if balance is None:
+                return "Nao consegui entender o saldo inicial. Exemplo: saldo 1000"
+            existing = self._repository.get_by_name(name)
+            if existing:
+                return f"A conta {existing.name} ja esta cadastrada com saldo {format_money(existing.current_balance)}."
+            record = self._repository.add(
+                AccountDraft(name=name, type=account_type, initial_balance=balance)
+            )
+            return f"Conta cadastrada: {record.name} com saldo {format_money(record.current_balance)}."
+
         match = re.search(
             r"^(?P<name>.+?)\s+(?P<type>banco|carteira|cartao|poupanca|poupança|investimento|outro)\s+saldo\s+(?P<balance>[\d.,]+)$",
             payload,

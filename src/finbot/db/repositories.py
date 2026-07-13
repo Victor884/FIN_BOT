@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, date, datetime
 from hashlib import sha256
 
@@ -6,7 +7,15 @@ from decimal import Decimal
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.orm import Session
 
-from finbot.db.models import AccountRecord, CardRecord, TransactionRecord, UserRecord
+from finbot.db.models import (
+    AccountRecord,
+    CardRecord,
+    CategoryRecord,
+    RecurringTransactionRecord,
+    TelegramConversationRecord,
+    TransactionRecord,
+    UserRecord,
+)
 from finbot.models.account import AccountDraft
 from finbot.models.card import CardDraft
 from finbot.models.transaction import TransactionDraft
@@ -108,11 +117,50 @@ class TransactionRepository:
         self.user_id = user_id
 
     def add(self, draft: TransactionDraft, dedupe_key: str) -> TransactionRecord:
-        scoped_key = dedupe_key
-        if self.user_id is not None:
-            scoped_key = sha256(f"{self.user_id}:{dedupe_key}".encode()).hexdigest()
+        scoped_key = self.scoped_dedupe_key(dedupe_key)
         record = TransactionRecord.from_draft(draft, scoped_key, user_id=self.user_id)
         self._session.add(record)
+        self._session.flush()
+        return record
+
+    def scoped_dedupe_key(self, dedupe_key: str) -> str:
+        if self.user_id is not None:
+            return sha256(f"{self.user_id}:{dedupe_key}".encode()).hexdigest()
+        return dedupe_key
+
+    def update_from_draft(
+        self, record: TransactionRecord, draft: TransactionDraft, dedupe_key: str
+    ) -> TransactionRecord:
+        record.type = draft.type.value
+        record.amount = draft.amount
+        record.transaction_date = draft.transaction_date
+        record.description = draft.description
+        record.category = draft.category
+        record.payment_method = draft.payment_method
+        record.account_from = draft.account_from
+        record.account_to = draft.account_to
+        record.card_name = draft.card_name
+        record.is_recurring = draft.is_recurring
+        record.installment_total = draft.installment_total
+        record.status = draft.status.value
+        record.confidence = draft.confidence
+        record.dedupe_key = self.scoped_dedupe_key(dedupe_key)
+        self._session.flush()
+        return record
+
+    def add_installment(
+        self,
+        draft: TransactionDraft,
+        dedupe_key: str,
+        *,
+        group_id: str,
+        number: int,
+        total: int,
+    ) -> TransactionRecord:
+        record = self.add(draft, dedupe_key)
+        record.installment_group_id = group_id
+        record.installment_number = number
+        record.installment_total = total
         self._session.flush()
         return record
 
@@ -174,6 +222,129 @@ class TransactionRepository:
             TransactionRecord.transaction_date.desc(), TransactionRecord.created_at.desc()
         ).limit(limit)
         return list(self._session.scalars(statement))
+
+    def list_unapplied_due(self, today: date) -> list[TransactionRecord]:
+        statement = select(TransactionRecord).where(
+            TransactionRecord.balance_applied.is_(False),
+            TransactionRecord.transaction_date <= today,
+        )
+        if self.user_id is not None:
+            statement = statement.where(TransactionRecord.user_id == self.user_id)
+        return list(self._session.scalars(statement.order_by(TransactionRecord.transaction_date.asc())))
+
+    def delete(self, record: TransactionRecord) -> None:
+        self._session.delete(record)
+        self._session.flush()
+
+
+class CategoryRepository:
+    def __init__(self, session: Session, user_id: str | None = None) -> None:
+        self._session = session
+        self.user_id = user_id
+
+    def list(self) -> list[CategoryRecord]:
+        if self.user_id is None:
+            return []
+        statement = select(CategoryRecord).where(CategoryRecord.user_id == self.user_id)
+        return list(self._session.scalars(statement.order_by(CategoryRecord.name.asc())))
+
+    def add(self, name: str) -> CategoryRecord:
+        if self.user_id is None:
+            raise ValueError("A user id is required for categories")
+        normalized = name.strip().lower().replace(" ", "_")
+        existing = self.get(normalized)
+        if existing is not None:
+            return existing
+        record = CategoryRecord(user_id=self.user_id, name=normalized)
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def get(self, name: str) -> CategoryRecord | None:
+        if self.user_id is None:
+            return None
+        statement = select(CategoryRecord).where(
+            CategoryRecord.user_id == self.user_id,
+            func.lower(CategoryRecord.name) == name.strip().lower().replace(" ", "_"),
+        )
+        return self._session.scalars(statement).first()
+
+    def delete_by_name(self, name: str) -> bool:
+        record = self.get(name)
+        if record is None:
+            return False
+        self._session.delete(record)
+        self._session.flush()
+        return True
+
+
+class ConversationRepository:
+    def __init__(self, session: Session, user_id: str | None = None) -> None:
+        self._session = session
+        self.user_id = user_id
+
+    def get(self) -> TelegramConversationRecord | None:
+        if self.user_id is None:
+            return None
+        record = self._session.get(TelegramConversationRecord, self.user_id)
+        expires_at = record.expires_at.replace(tzinfo=UTC) if record and record.expires_at.tzinfo is None else (record.expires_at if record else None)
+        if record is not None and expires_at is not None and expires_at <= datetime.now(UTC):
+            self._session.delete(record)
+            self._session.flush()
+            return None
+        return record
+
+    def set(self, action: str, payload: dict[str, object], expires_at: datetime) -> None:
+        if self.user_id is None:
+            raise ValueError("A user id is required for conversations")
+        record = self._session.get(TelegramConversationRecord, self.user_id)
+        encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+        now = datetime.now(UTC)
+        if record is None:
+            record = TelegramConversationRecord(
+                user_id=self.user_id,
+                action=action,
+                payload_json=encoded,
+                expires_at=expires_at,
+            )
+            self._session.add(record)
+        else:
+            record.action = action
+            record.payload_json = encoded
+            record.expires_at = expires_at
+            record.updated_at = now
+        self._session.flush()
+
+    def payload(self, record: TelegramConversationRecord) -> dict[str, object]:
+        return json.loads(record.payload_json)
+
+    def clear(self) -> None:
+        if self.user_id is None:
+            return
+        record = self._session.get(TelegramConversationRecord, self.user_id)
+        if record is not None:
+            self._session.delete(record)
+            self._session.flush()
+
+
+class RecurringTransactionRepository:
+    def __init__(self, session: Session, user_id: str | None = None) -> None:
+        self._session = session
+        self.user_id = user_id
+
+    def add(self, record: RecurringTransactionRecord) -> RecurringTransactionRecord:
+        self._session.add(record)
+        self._session.flush()
+        return record
+
+    def list_due(self, today: date) -> list[RecurringTransactionRecord]:
+        statement = select(RecurringTransactionRecord).where(
+            RecurringTransactionRecord.is_active.is_(True),
+            RecurringTransactionRecord.next_due_date <= today,
+        )
+        if self.user_id is not None:
+            statement = statement.where(RecurringTransactionRecord.user_id == self.user_id)
+        return list(self._session.scalars(statement.order_by(RecurringTransactionRecord.next_due_date.asc())))
 
 
 class UserRepository:

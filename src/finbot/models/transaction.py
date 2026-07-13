@@ -29,5 +29,6 @@ class TransactionDraft:
     account_to: str | None = None
     card_name: str | None = None
     is_recurring: bool = False
+    installment_total: int | None = None
     status: TransactionStatus = TransactionStatus.PAID
     confidence: float = 1.0

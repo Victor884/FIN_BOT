@@ -24,6 +24,12 @@ class FakeTelegramClient:
         self.messages.append((chat_id, text))
         return {"ok": True}
 
+    async def send_document_async(
+        self, chat_id: int | str, content: bytes, filename: str
+    ) -> dict[str, object]:
+        self.messages.append((chat_id, f"document:{filename}:{len(content)}"))
+        return {"ok": True}
+
 
 class FakeSheetsClient:
     def __init__(self) -> None:
@@ -157,10 +163,9 @@ def test_telegram_webhook_returns_missing_fields() -> None:
     ]
 
 
-def test_telegram_webhook_export_updates_google_sheets() -> None:
+def test_telegram_webhook_export_sends_csv() -> None:
     fake_telegram = FakeTelegramClient()
-    fake_sheets = FakeSheetsClient()
-    client = make_client(telegram_client=fake_telegram, sheets_client=fake_sheets)
+    client = make_client(telegram_client=fake_telegram)
 
     response = client.post(
         "/telegram/webhook",
@@ -177,15 +182,9 @@ def test_telegram_webhook_export_updates_google_sheets() -> None:
 
     assert response.status_code == 202
     assert response.json()["status"] == "export"
-    assert response.json()["sheet_synced"] is True
-    assert fake_sheets.setup_calls == 1
-    assert fake_telegram.messages == [
-        (
-            456,
-            "Vou atualizar o Google Sheets em segundo plano. Te aviso aqui quando terminar.",
-        ),
-        (456, "Google Sheets atualizado com abas, cabecalhos e formulas."),
-    ]
+    assert response.json()["sheet_synced"] is False
+    assert fake_telegram.messages[0][1].startswith("document:finbot-transacoes.csv:")
+    assert fake_telegram.messages[1] == (456, "Arquivo CSV enviado.")
 
 
 def test_telegram_webhook_ignores_update_without_text() -> None:

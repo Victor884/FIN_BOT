@@ -48,6 +48,9 @@ class TransactionItem(BaseModel):
     sheets_synced: bool
     needs_confirmation: bool
     is_recurring: bool
+    installment_group_id: str | None = None
+    installment_number: int | None = None
+    installment_total: int | None = None
     created_at: datetime
 
 

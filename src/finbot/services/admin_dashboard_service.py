@@ -271,9 +271,10 @@ class AdminDashboardService:
                 name="google_sheets",
                 status=(
                     "configured"
-                    if self._settings.google_sheets_spreadsheet_id
-                    and self._settings.google_service_account_file
+                    if self._settings.google_sheets_active
                     else "not_configured"
+                    if self._settings.google_sheets_enabled
+                    else "disabled"
                 ),
             ),
             IntegrationState(

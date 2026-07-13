@@ -25,6 +25,8 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      - key: DATABASE_AUTO_MIGRATE
+        value: "false"
       - key: AI_ENABLED
         value: "false"
       - key: AI_PROVIDER
@@ -33,6 +35,8 @@ services:
         value: gpt-5.4-nano
       - key: OPENAI_BASE_URL
         value: https://api.openai.com/v1
+      - key: GOOGLE_SHEETS_ENABLED
+        value: "false"
       - key: LOG_LEVEL
         value: INFO
       - key: HTTP_CONNECT_TIMEOUT_SECONDS

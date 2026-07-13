@@ -211,5 +211,8 @@ def _to_item(record: TransactionRecord) -> TransactionItem:
         sheets_synced=record.sheets_synced,
         needs_confirmation=record.needs_confirmation,
         is_recurring=record.is_recurring,
+        installment_group_id=record.installment_group_id,
+        installment_number=record.installment_number,
+        installment_total=record.installment_total,
         created_at=record.created_at,
     )
